@@ -63,39 +63,6 @@ streams:
   xiaomi1: xiaomi://***&channel=2
 ```
 
-### Dual-lens cameras
-
-Some models have **two lenses** (two physical cameras facing different
-directions) that are streamed over a single P2P connection. Stock go2rtc
-used to request and decode only the first lens.
-
-To get **both lenses as two independent streams**, start the stream with
-`channel=dual` and select the lens with the new `lens=1|2` parameter:
-
-```yaml
-streams:
-  cam_lens1: xiaomi://<uid>@<ip>?did=<did>&model=<model>&channel=dual&lens=1
-  cam_lens2: xiaomi://<uid>@<ip>?did=<did>&model=<model>&channel=dual&lens=2
-```
-
-- `channel=dual` sends `{"videoquality":q,"videoquality2":q,"enableaudio":a}`
-  so the camera starts streaming both lenses.
-- `lens=1` / `lens=2` filters the interleaved video packets to a single lens
-  (the camera multiplexes both lenses on one channel and tags the packets in
-  the high 16 bits of the frame flags).
-- Omitting `lens` keeps the old behaviour (all frames, may look garbled when
-  both lenses are on). Omitting `channel=dual` keeps the classic single-lens
-  stream unchanged.
-
-**Verified model**
-
-| Name | Notes |
-|------|-------|
-| 小米智能室外摄像机 4 双摄版 (Xiaomi Outdoor Camera 4 Dual / Dual-Cam Edition) | dual-lens, local device id `isa.camera.cw501d`, codename `MJSXJ10HL` (from public sources, not officially confirmed) |
-
-The Chinese name is kept as seen in the Mi Home app; the English name and the
-model code come from public sources and may not be exact.
-
 ## Shared homes (shared devices)
 
 A Mi Home account can be a member of a **shared home** owned by someone else.
