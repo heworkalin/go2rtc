@@ -221,10 +221,81 @@ func wakeUpCamera(url *url.URL) error {
 func apiXiaomi(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
+		if r.URL.Query().Get("shared") != "" {
+			apiSharedHomes(w, r)
+			return
+		}
 		apiDeviceList(w, r)
 	case "POST":
 		apiAuth(w, r)
 	}
+}
+
+// apiSharedHomes enumerates shared homes and their devices (read-only).
+//
+// It returns api.Source entries that can be added to go2rtc directly.
+//
+// NOTE (region limitation):
+//
+//	This endpoint ONLY works for China Mainland Mi Home accounts (region == "").
+//	The shared-home API surface (/v2/homeroom/gethome_merged with fetch_share,
+//	and /v2/home/home_device_list) has only been verified against the China
+//	Mainland Mi Home ecosystem. Whether the international (global) Mi Home
+//	ecosystem exposes an equivalent shared-home flow is UNKNOWN.
+//
+// Usage: GET /api/xiaomi?shared=1&id=<userID>&region=
+func apiSharedHomes(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+
+	user := query.Get("id")
+	if user == "" {
+		http.Error(w, "xiaomi: id required", http.StatusBadRequest)
+		return
+	}
+
+	region := query.Get("region")
+	if region != "" {
+		http.Error(w, "xiaomi: shared homes are only supported for China mainland region", http.StatusBadRequest)
+		return
+	}
+
+	cloud, err := getCloud(user)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	homes, err := cloud.ListSharedHomes(GetBaseURL(region))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var items []*api.Source
+	for _, h := range homes {
+		for _, d := range h.Devices {
+			// Shared devices may only be reachable through the Miss/cs2 path.
+			// Build the same URL shape used by the regular Xiaomi flow so it
+			// can be resolved later by getCameraURL().
+			u := &url.URL{
+				Scheme: "xiaomi",
+				Host:   d.LocalIP,
+				User:   url.UserPassword(user, region),
+			}
+			q := url.Values{}
+			q.Set("did", d.DID)
+			q.Set("model", d.Model)
+			u.RawQuery = q.Encode()
+
+			items = append(items, &api.Source{
+				Name: d.Name,
+				Info: fmt.Sprintf("shared home: %s, model: %s, permit: %d", h.Home.Name, d.Model, d.PermitLevel),
+				URL:  u.String(),
+			})
+		}
+	}
+
+	api.ResponseSources(w, items)
 }
 
 func apiDeviceList(w http.ResponseWriter, r *http.Request) {

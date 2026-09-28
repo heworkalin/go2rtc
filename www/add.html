@@ -500,7 +500,18 @@
             </select>
             <button type="submit">load devices</button>
         </form>
+        <!--
+            Shared homes are ONLY verified for the China Mainland Mi Home ecosystem.
+            The region selector is intentionally hidden here and forced to China (empty region).
+        -->
+        <form id="xiaomi-shared-form">
+            <select id="xiaomi-shared-id" name="id" required></select>
+            <input type="hidden" name="region" value="" />
+            <input type="hidden" name="shared" value="1" />
+            <button type="submit">load shared devices (China mainland only)</button>
+        </form>
         <table id="xiaomi-table"></table>
+        <table id="xiaomi-shared-table"></table>
     </div>
     <script>
         async function xiaomiReload(ev) {
@@ -512,8 +523,9 @@
 
             const r = await fetch('api/xiaomi', {'cache': 'no-cache'});
             const data = await r.json();
-            const users = document.getElementById('xiaomi-id');
-            users.innerHTML = data.map(item => `<option value="${item}">${item}</option>`).join('');
+            const options = data.map(item => `<option value="${item}">${item}</option>`).join('');
+            document.getElementById('xiaomi-id').innerHTML = options;
+            document.getElementById('xiaomi-shared-id').innerHTML = options;
         }
 
         document.getElementById('xiaomi').addEventListener('click', xiaomiReload);
@@ -549,6 +561,13 @@
             ev.preventDefault();
             const params = new URLSearchParams(new FormData(ev.target));
             await getSources('xiaomi-table', 'api/xiaomi?' + params.toString());
+        });
+
+        // Shared homes are only verified for the China Mainland Mi Home ecosystem.
+        document.getElementById('xiaomi-shared-form').addEventListener('submit', async ev => {
+            ev.preventDefault();
+            const params = new URLSearchParams(new FormData(ev.target));
+            await getSources('xiaomi-shared-table', 'api/xiaomi?' + params.toString());
         });
     </script>
 
