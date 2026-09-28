@@ -110,11 +110,14 @@ GET /api/xiaomi?shared=1&id=<userID>&region=
 It returns the shared homes and their devices as `api.Source` entries that can
 be added to go2rtc directly.
 
-> ⚠️ **China mainland only.** This was only tested and verified against the
-> China Mainland Mi Home ecosystem (`region` must be empty). Whether the
+> ℹ️ **Tested on China mainland only.** Only the China Mainland Mi Home
+> ecosystem has been verified so far (`region` empty). Whether the
 > international Mi Home ecosystem exposes an equivalent shared-home flow is
-> unknown, so the endpoint currently **rejects any non-empty `region`**.
-> If you successfully test another region, the check can be relaxed.
+> not yet known.
+> As a **conservative default** (to avoid sending wrong requests to unverified
+> regions), the endpoint currently rejects any non-empty `region`.
+> This is a safety default, **not a hard limitation** — if shared homes are
+> confirmed to work in another region, this check can be relaxed or removed.
 
 Implementation notes (endpoints used):
 

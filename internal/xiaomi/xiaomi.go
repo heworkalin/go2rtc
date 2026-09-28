@@ -235,13 +235,17 @@ func apiXiaomi(w http.ResponseWriter, r *http.Request) {
 //
 // It returns api.Source entries that can be added to go2rtc directly.
 //
-// NOTE (region limitation):
+// NOTE (region):
 //
-//	This endpoint ONLY works for China Mainland Mi Home accounts (region == "").
-//	The shared-home API surface (/v2/homeroom/gethome_merged with fetch_share,
-//	and /v2/home/home_device_list) has only been verified against the China
-//	Mainland Mi Home ecosystem. Whether the international (global) Mi Home
-//	ecosystem exposes an equivalent shared-home flow is UNKNOWN.
+//	Only the China Mainland Mi Home ecosystem has been tested and verified so
+//	far (region == ""). The shared-home API surface
+//	(/v2/homeroom/gethome_merged with fetch_share, and
+//	/v2/home/home_device_list) has not been tested against the international
+//	(global) Mi Home ecosystem.
+//
+//	As a conservative default, non-empty regions are rejected so that we do not
+//	send unverified requests. This is a safety default, not a hard limitation:
+//	relax it once another region is confirmed to work.
 //
 // Usage: GET /api/xiaomi?shared=1&id=<userID>&region=
 func apiSharedHomes(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +259,8 @@ func apiSharedHomes(w http.ResponseWriter, r *http.Request) {
 
 	region := query.Get("region")
 	if region != "" {
-		http.Error(w, "xiaomi: shared homes are only supported for China mainland region", http.StatusBadRequest)
+		// Conservative default: shared homes are only verified for China mainland.
+		http.Error(w, "xiaomi: shared homes are only verified for China mainland; non-empty region is disabled by default", http.StatusBadRequest)
 		return
 	}
 
