@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/AlexxIT/go2rtc/pkg/tutk"
@@ -72,13 +73,25 @@ func NewClient(rawURL string) (*Client, error) {
 		return nil, err
 	}
 
-	return &Client{Conn: conn, key: key, model: model}, nil
+	lens, _ := strconv.Atoi(query.Get("lens"))
+	if lens != 1 && lens != 2 {
+		lens = 0
+	}
+
+	return &Client{Conn: conn, key: key, model: model, lens: lens}, nil
 }
 
 type Client struct {
 	Conn
 	key   []byte
 	model string
+	// lens filters which camera lens to output for dual-lens models:
+	//   0 - no filter (default, all frames)
+	//   1 - first lens only
+	//   2 - second lens only
+	// See Packet.Lens. Only meaningful when the stream was started with
+	// channel=dual.
+	lens int
 }
 
 const (
@@ -186,8 +199,13 @@ func (c *Client) StartMedia(channel, quality, audio string) error {
 	data := binary.BigEndian.AppendUint32(nil, cmdVideoStart)
 	switch channel {
 	case "", "0":
+		// Only the first lens.
 		data = fmt.Appendf(data, `{"videoquality":%s,"enableaudio":%s}`, quality, audio)
+	case "dual", "both":
+		// Both lenses on at once: first + second.
+		data = fmt.Appendf(data, `{"videoquality":%s,"videoquality2":%s,"enableaudio":%s}`, quality, quality, audio)
 	default:
+		// Only the second lens (any other channel number).
 		data = fmt.Appendf(data, `{"videoquality":-1,"videoquality2":%s,"enableaudio":%s}`, quality, audio)
 	}
 	return c.WriteCommand(data)
@@ -222,37 +240,68 @@ func (c *Client) SpeakerCodec() uint32 {
 const hdrSize = 32
 
 func (c *Client) ReadPacket() (*Packet, error) {
-	hdr, payload, err := c.Conn.ReadPacket()
-	if err != nil {
-		return nil, fmt.Errorf("miss: read media: %w", err)
-	}
+	for {
+		hdr, payload, err := c.Conn.ReadPacket()
+		if err != nil {
+			return nil, fmt.Errorf("miss: read media: %w", err)
+		}
 
-	if len(hdr) < hdrSize {
-		return nil, fmt.Errorf("miss: packet header too small")
-	}
+		if len(hdr) < hdrSize {
+			return nil, fmt.Errorf("miss: packet header too small")
+		}
 
-	payload, err = crypto.Decode(payload, c.key)
-	if err != nil {
-		return nil, err
-	}
+		codecID := binary.LittleEndian.Uint32(hdr[4:])
+		flags := binary.LittleEndian.Uint32(hdr[12:])
+		lens := lensFromFlags(flags)
 
-	pkt := &Packet{
-		CodecID:  binary.LittleEndian.Uint32(hdr[4:]),
-		Sequence: binary.LittleEndian.Uint32(hdr[8:]),
-		Flags:    binary.LittleEndian.Uint32(hdr[12:]),
-		Payload:  payload,
-	}
+		// For dual-lens streams the caller may select a single lens.
+		// Only video packets carry a lens id; skip the other lens' video.
+		if c.lens != 0 && (codecID == codecH264 || codecID == codecH265) && lens != 0 && lens != c.lens {
+			continue
+		}
 
-	switch c.model {
-	case ModelDafang, ModelXiaofang, ModelLoockV2:
-		// Dafang has ts in sec
-		// LoockV2 has ts in msec for video, but zero ts for audio
-		pkt.Timestamp = uint64(time.Now().UnixMilli())
-	default:
-		pkt.Timestamp = binary.LittleEndian.Uint64(hdr[16:])
-	}
+		payload, err = crypto.Decode(payload, c.key)
+		if err != nil {
+			return nil, err
+		}
 
-	return pkt, nil
+		pkt := &Packet{
+			CodecID:  codecID,
+			Sequence: binary.LittleEndian.Uint32(hdr[8:]),
+			Flags:    flags,
+			Lens:     lens,
+			Payload:  payload,
+		}
+
+		switch c.model {
+		case ModelDafang, ModelXiaofang, ModelLoockV2:
+			// Dafang has ts in sec
+			// LoockV2 has ts in msec for video, but zero ts for audio
+			pkt.Timestamp = uint64(time.Now().UnixMilli())
+		default:
+			pkt.Timestamp = binary.LittleEndian.Uint64(hdr[16:])
+		}
+
+		return pkt, nil
+	}
+}
+
+// lensFromFlags maps the high 16 bits of the packet flags to a lens id.
+//
+// Empirically (Xiaomi Outdoor Camera 4 Dual / isa.camera.cw501d):
+//
+//	0x0006 -> first lens
+//	0x0146 -> second lens
+//
+// Returns 0 when unknown (single-lens models or non-video packets).
+func lensFromFlags(flags uint32) int {
+	switch flags >> 16 {
+	case 0x0006:
+		return 1
+	case 0x0146:
+		return 2
+	}
+	return 0
 }
 
 func (c *Client) WriteAudio(codecID uint32, payload []byte) error {
@@ -272,9 +321,12 @@ func (c *Client) WriteAudio(codecID uint32, payload []byte) error {
 
 type Packet struct {
 	//Length    uint32
-	CodecID   uint32
-	Sequence  uint32
-	Flags     uint32
+	CodecID  uint32
+	Sequence uint32
+	Flags    uint32
+	// Lens is derived from the high 16 bits of Flags for dual-lens models:
+	// 1 = first lens, 2 = second lens, 0 = unknown/single-lens.
+	Lens      int
 	Timestamp uint64 // msec
 	//TimestampS uint32
 	//Reserved uint32

@@ -57,14 +57,16 @@ type Room struct {
 	DIDs     []string `json:"dids"`
 }
 
-// SharedDevice 对应 home_device_list 的 device_info 条目（取枚举所需字段）。
+// SharedDevice corresponds to a device_info entry of home_device_list
+// (only the fields needed for enumeration are kept).
 //
-// 实测字段（2026-09-28）：
+// Observed shape (2026-09-28, redacted):
 //
-//	{"did":"...","uid":3174113955,"token":"...","name":"客厅","model":"isa.camera.cw501d",
-//	 "permitLevel":68,"isOnline":true,"localip":"...","mac":"...",
-//	 "owner":{"userid":3174113955,"nickname":"..."},
-//	 "extra":{"fw_version":"5.3.2_0385"}}
+//	{"did":"<DID>","uid":<OWNER_UID>,"token":"<TOKEN>","name":"<NAME>",
+//	 "model":"<VENDOR>.camera.<MODEL>","permitLevel":68,"isOnline":true,
+//	 "localip":"<IP>","mac":"<MAC>",
+//	 "owner":{"userid":<OWNER_UID>,"nickname":"<NAME>"},
+//	 "extra":{"fw_version":"<FW>"}}
 type SharedDevice struct {
 	DID         string      `json:"did"`
 	UID         int64       `json:"uid"`
