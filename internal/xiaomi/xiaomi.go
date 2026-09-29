@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -397,8 +399,13 @@ var qrLogin *xiaomi.QRLogin
 
 // apiQRStart handles POST /api/xiaomi?action=qr_start.
 //
-// It performs QR login step 1 and returns the QR image as a data URL along with
-// the manual fallback login link. Response: {"qr_image":"data:...","login_url":"..."}
+// It performs QR login step 1 and returns the QR image. Two delivery modes:
+//
+//   - default: inline data URL {"qr_image":"data:..."}
+//   - as_file=1: the PNG is written into <work-dir>/exchange/qr.png and only its
+//     path is returned {"qr_image_path":"..."}. This is what the Android app
+//     uses: pushing megabytes of base64 through a socket is wasteful when both
+//     sides already share the work dir.
 func apiQRStart(w http.ResponseWriter, r *http.Request) {
 	auth = xiaomi.NewCloud(AppXiaomiHome)
 
@@ -419,10 +426,50 @@ func apiQRStart(w http.ResponseWriter, r *http.Request) {
 	qrLogin = state
 
 	w.Header().Set("Content-Type", api.MimeJSON)
+
+	if r.URL.Query().Get("as_file") != "" {
+		path, err := writeExchangeFile("qr.png", image)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"qr_image_path": path,
+			"qr_image_type": "png",
+			"login_url":     state.LoginURL,
+			"timeout":       state.Timeout,
+		})
+		return
+	}
+
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"qr_image":  "data:image/png;base64," + base64.StdEncoding.EncodeToString(image),
 		"login_url": state.LoginURL,
 	})
+}
+
+// exchangeDirName is the sub directory of the work dir shared with the host app
+// for image and payload exchange.
+const exchangeDirName = "exchange"
+
+// writeExchangeFile stores bytes under <work-dir>/exchange/name and returns the
+// absolute path. It fails when no work dir is configured (non-Android build),
+// which is fine: such builds use the inline response instead.
+func writeExchangeFile(name string, data []byte) (string, error) {
+	if app.WorkDir == "" {
+		return "", errors.New("xiaomi: as_file requires a work dir")
+	}
+
+	dir := filepath.Join(app.WorkDir, exchangeDirName)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // apiQRWait handles POST /api/xiaomi?action=qr_wait.
@@ -510,6 +557,22 @@ func apiAuth(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var login *xiaomi.LoginError
 		if errors.As(err, &login) {
+			// as_file=1: write the captcha image to the exchange dir and return
+			// its path instead of inlining base64 (Android app contract).
+			if r.URL.Query().Get("as_file") != "" && len(login.Captcha) != 0 {
+				if path, werr := writeExchangeFile("captcha.jpg", login.Captcha); werr == nil {
+					w.Header().Set("Content-Type", api.MimeJSON)
+					w.WriteHeader(http.StatusUnauthorized)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"captcha_path": path,
+						"captcha_type": "jpg",
+						"verify_phone": login.VerifyPhone,
+						"verify_email": login.VerifyEmail,
+					})
+					return
+				}
+			}
+
 			w.Header().Set("Content-Type", api.MimeJSON)
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = json.NewEncoder(w).Encode(err)
