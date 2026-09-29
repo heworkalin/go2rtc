@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/AlexxIT/go2rtc/internal/api"
 	"github.com/AlexxIT/go2rtc/internal/app"
 	"github.com/AlexxIT/go2rtc/internal/streams"
 	"github.com/AlexxIT/go2rtc/pkg/core"
@@ -55,6 +56,15 @@ func Init() {
 	_, Port, _ = net.SplitHostPort(address)
 
 	log.Info().Str("addr", address).Msg("[rtsp] listen")
+
+	// Publish the effective listen address so the API ready file can report
+	// the real RTSP endpoint (the API port is a different one).
+	api.RegisterRTSPListen(func() (string, bool) {
+		if ln != nil && ln.Addr() != nil {
+			return ln.Addr().String(), true
+		}
+		return address, address != ""
+	})
 
 	if query, err := url.ParseQuery(conf.Mod.DefaultQuery); err == nil {
 		defaultMedias = ParseQuery(query)

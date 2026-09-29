@@ -100,7 +100,15 @@ func Init() {
 		}
 	}
 
-	writeReadyFile(cfg.Mod.Listen, cfg.Mod.UnixListen, cfg.Mod.UnixListens)
+	// The ready file must report the RTSP endpoint too, but the rtsp module
+	// initialises after this one. Defer the write slightly so every module has
+	// registered its listener by then.
+	readyListen, readyUnixListen, readyUnixListens := cfg.Mod.Listen, cfg.Mod.UnixListen, cfg.Mod.UnixListens
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		log.Info().Msg("[api] writing ready file")
+		writeReadyFile(readyListen, readyUnixListen, readyUnixListens)
+	}()
 
 	// Initialize the HTTPS server
 	if cfg.Mod.TLSListen != "" && cfg.Mod.TLSCert != "" && cfg.Mod.TLSKey != "" {
@@ -144,14 +152,25 @@ func writeReadyFile(listen, unixListen string, unixListens []string) {
 		}
 	}
 
+	// Resolve the RTSP port from the live stream server config. The API port
+	// is a different thing and used to be reported here by mistake, which made
+	// embedded hosts advertise port 1984 as the RTSP endpoint.
+	rtspListen := ""
+	rtspPort := 0
+	if l, ok := rtspPortFunc(); ok {
+		rtspListen, rtspPort = l, portOf(l)
+	}
+
 	info, err := json.Marshal(map[string]any{
-		"pid":        os.Getpid(),
-		"listen":     listen,
-		"tcp_port":   Port,
-		"unix":       socks,
-		"version":    app.Version,
-		"config":     app.ConfigPath,
-		"started_at": time.Now().Unix(),
+		"pid":         os.Getpid(),
+		"listen":      listen,
+		"api_port":    Port,
+		"rtsp_listen": rtspListen,
+		"rtsp_port":   rtspPort,
+		"unix":        socks,
+		"version":     app.Version,
+		"config":      app.ConfigPath,
+		"started_at":  time.Now().Unix(),
 	})
 	if err != nil {
 		return
@@ -161,6 +180,33 @@ func writeReadyFile(listen, unixListen string, unixListens []string) {
 	if err = os.WriteFile(path, info, 0600); err != nil {
 		log.Warn().Err(err).Msg("[api] ready file")
 	}
+}
+
+// rtspListenFunc is registered by the rtsp module so the ready file can report
+// the real RTSP endpoint without an import cycle.
+var rtspListenFunc func() (string, bool)
+
+// RegisterRTSPListen lets the rtsp module publish its effective listen address.
+func RegisterRTSPListen(f func() (string, bool)) {
+	rtspListenFunc = f
+}
+
+func rtspPortFunc() (string, bool) {
+	if rtspListenFunc == nil {
+		log.Warn().Msg("[api] rtsp listen not registered yet")
+		return "", false
+	}
+	return rtspListenFunc()
+}
+
+// portOf extracts the numeric port from a listen address like "127.0.0.1:8554".
+func portOf(address string) int {
+	_, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(port)
+	return n
 }
 
 func listen(network, address string) {
