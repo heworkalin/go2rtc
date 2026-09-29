@@ -1,6 +1,7 @@
 package xiaomi
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -227,7 +228,14 @@ func apiXiaomi(w http.ResponseWriter, r *http.Request) {
 		}
 		apiDeviceList(w, r)
 	case "POST":
-		apiAuth(w, r)
+		switch r.URL.Query().Get("action") {
+		case "qr_start":
+			apiQRStart(w, r)
+		case "qr_wait":
+			apiQRWait(w, r)
+		default:
+			apiAuth(w, r)
+		}
 	}
 }
 
@@ -381,6 +389,82 @@ func (d *Device) HasCamera() bool {
 }
 
 var auth *xiaomi.Cloud
+
+// qrLogin keeps the state of the in-flight QR login. It is a package-level
+// singleton for the same reason `auth` is: the browser drives the handshake
+// with two separate requests and go2rtc is a single-user local tool.
+var qrLogin *xiaomi.QRLogin
+
+// apiQRStart handles POST /api/xiaomi?action=qr_start.
+//
+// It performs QR login step 1 and returns the QR image as a data URL along with
+// the manual fallback login link. Response: {"qr_image":"data:...","login_url":"..."}
+func apiQRStart(w http.ResponseWriter, r *http.Request) {
+	auth = xiaomi.NewCloud(AppXiaomiHome)
+
+	state, err := auth.LoginQR()
+	if err != nil {
+		auth = nil
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	image, err := auth.QRImage(state)
+	if err != nil {
+		auth = nil
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	qrLogin = state
+
+	w.Header().Set("Content-Type", api.MimeJSON)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"qr_image":  "data:image/png;base64," + base64.StdEncoding.EncodeToString(image),
+		"login_url": state.LoginURL,
+	})
+}
+
+// apiQRWait handles POST /api/xiaomi?action=qr_wait.
+//
+// It blocks in QR login steps 3 and 4 until the user scans the code (or the
+// polling budget runs out) and, on success, persists the account token exactly
+// like apiAuth does.
+func apiQRWait(w http.ResponseWriter, r *http.Request) {
+	if auth == nil || qrLogin == nil {
+		http.Error(w, "xiaomi: qr login not started", http.StatusBadRequest)
+		return
+	}
+
+	state := qrLogin
+
+	if err := auth.QRWait(state); err != nil {
+		auth, qrLogin = nil, nil
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := auth.QRFinish(state); err != nil {
+		auth, qrLogin = nil, nil
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	userID, token := auth.UserToken()
+	auth, qrLogin = nil, nil
+
+	cloudsMu.Lock()
+	if tokens == nil {
+		tokens = map[string]string{userID: token}
+	} else {
+		tokens[userID] = token
+	}
+	cloudsMu.Unlock()
+
+	if err := app.PatchConfig([]string{"xiaomi", userID}, token); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
 
 func apiAuth(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {

@@ -141,8 +141,8 @@ func (c *Cloud) GetHomes(baseURL string) ([]Home, error) {
 	}
 
 	var v struct {
-		HomeList     []Home `json:"homelist"`
-		CariotHomes  []Home `json:"cariot_home_list"` // 车家，与 homelist 并列
+		HomeList    []Home `json:"homelist"`
+		CariotHomes []Home `json:"cariot_home_list"` // 车家，与 homelist 并列
 	}
 	if err = json.Unmarshal(res, &v); err != nil {
 		return nil, fmt.Errorf("xiaomi: gethome_merged parse: %w", err)

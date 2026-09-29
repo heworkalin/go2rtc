@@ -477,6 +477,7 @@
             <input type="text" name="username" placeholder="username" required>
             <input type="password" name="password" placeholder="password" required>
             <button type="submit">login</button>
+            <button type="button" id="xiaomi-qr-toggle">scan QR</button>
         </form>
         <form id="xiaomi-captcha-form">
             <img id="xiaomi-captcha">
@@ -487,6 +488,10 @@
             <label id="xiaomi-verify"></label>
             <input type="text" name="verify" placeholder="verify" required size="10">
             <button type="submit">send</button>
+        </form>
+        <form id="xiaomi-qr-form">
+            <img id="xiaomi-qr" alt="qr" width="240" height="240">
+            <button type="submit">scan QR with Mi Home APP</button>
         </form>
         <form id="xiaomi-devices-form">
             <select id="xiaomi-id" name="id" required></select>
@@ -520,6 +525,7 @@
             document.getElementById('xiaomi-login-form').style.display = 'flex';
             document.getElementById('xiaomi-captcha-form').style.display = 'none';
             document.getElementById('xiaomi-verify-form').style.display = 'none';
+            document.getElementById('xiaomi-qr-form').style.display = 'none';
 
             const r = await fetch('api/xiaomi', {'cache': 'no-cache'});
             const data = await r.json();
@@ -556,6 +562,36 @@
         document.getElementById('xiaomi-login-form').addEventListener('submit', xiaomiLogin);
         document.getElementById('xiaomi-captcha-form').addEventListener('submit', xiaomiLogin);
         document.getElementById('xiaomi-verify-form').addEventListener('submit', xiaomiLogin);
+
+        // QR login: step 1 fetches the image, step 2 blocks until the user scans.
+        document.getElementById('xiaomi-qr-toggle').addEventListener('click', () => {
+            document.getElementById('xiaomi-login-form').style.display = 'none';
+            document.getElementById('xiaomi-qr-form').style.display = 'flex';
+        });
+
+        document.getElementById('xiaomi-qr-form').addEventListener('submit', async ev => {
+            ev.preventDefault();
+
+            const img = document.getElementById('xiaomi-qr');
+            img.removeAttribute('src');
+
+            const start = await fetch('api/xiaomi?action=qr_start', {method: 'POST'});
+            if (!start.ok) {
+                alert('ERROR: ' + await start.text());
+                return;
+            }
+            const {qr_image, login_url} = await start.json();
+            img.src = qr_image;
+            img.alt = login_url || 'qr';
+
+            const wait = await fetch('api/xiaomi?action=qr_wait', {method: 'POST'});
+            if (wait.ok) {
+                alert('OK');
+                xiaomiReload();
+            } else {
+                alert('ERROR: ' + await wait.text());
+            }
+        });
 
         document.getElementById('xiaomi-devices-form').addEventListener('submit', async ev => {
             ev.preventDefault();
