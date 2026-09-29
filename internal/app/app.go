@@ -1,13 +1,17 @@
 package app
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strings"
+	"time"
 )
 
 var (
@@ -23,7 +27,12 @@ var (
 	// private directory and every file is created inside it, so nothing
 	// depends on the process current directory.
 	WorkDir string
-	Info    = make(map[string]any)
+	// DNSServers overrides the resolver list. Android provides no
+	// /etc/resolv.conf, so a child process would fall back to [::1]:53 and
+	// fail every lookup; the host app reads the system resolvers and passes
+	// them here as a comma separated list.
+	DNSServers []string
+	Info       = make(map[string]any)
 )
 
 const usage = `Usage of go2rtc:
@@ -32,6 +41,7 @@ const usage = `Usage of go2rtc:
   -d, --daemon    Run in background
   -v, --version   Print version and exit
       --work-dir  Writable directory for config/logs/cache (Android embedded)
+      --dns       Comma separated DNS servers (Android has no resolv.conf)
 `
 
 func Init() {
@@ -39,6 +49,7 @@ func Init() {
 	var daemon bool
 	var version bool
 	var workDir string
+	var dns string
 
 	flag.Var(&config, "config", "")
 	flag.Var(&config, "c", "")
@@ -47,9 +58,20 @@ func Init() {
 	flag.BoolVar(&version, "version", false, "")
 	flag.BoolVar(&version, "v", false, "")
 	flag.StringVar(&workDir, "work-dir", "", "")
+	flag.StringVar(&dns, "dns", "", "")
 
 	flag.Usage = func() { fmt.Print(usage) }
 	flag.Parse()
+
+	// DNS override. Empty entries are ignored so a trailing comma is harmless.
+	for _, s := range strings.Split(dns, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			DNSServers = append(DNSServers, s)
+		}
+	}
+	if len(DNSServers) != 0 {
+		applyDNSOverride()
+	}
 
 	// Environment variable fallback, so the Android app can pass the work
 	// directory without touching the argument list.
@@ -148,4 +170,44 @@ func readRevisionTime() (revision, vcsTime string) {
 		}
 	}
 	return
+}
+
+// applyDNSOverride installs the DNS servers passed with -dns into Go's
+// resolver.
+//
+// Android provides no /etc/resolv.conf, so a child process has no way to learn
+// the system resolvers and falls back to [::1]:53, where nothing listens. The
+// host app therefore reads ConnectivityManager and hands the addresses over.
+//
+// Go's pure-Go resolver honours a custom Dial function on net.Resolver, which
+// lets us query those servers directly over UDP with a short timeout.
+func applyDNSOverride() {
+	servers := DNSServers
+	if len(servers) == 0 {
+		return
+	}
+
+	Logger.Info().Strs("servers", servers).Msg("dns override")
+
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 5 * time.Second}
+			var lastErr error
+			for _, s := range servers {
+				// Go hands us "host:port"; replace the host, keep the port.
+				_, port, err := net.SplitHostPort(address)
+				if err != nil || port == "" {
+					port = "53"
+				}
+				target := net.JoinHostPort(s, port)
+				conn, err := d.DialContext(ctx, network, target)
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			return nil, lastErr
+		},
+	}
 }
