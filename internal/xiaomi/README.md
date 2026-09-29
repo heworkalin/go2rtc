@@ -68,6 +68,12 @@ streams:
 A Mi Home account can be a member of a **shared home** owned by someone else.
 The shared cameras appear in a different API than the owned devices.
 
+> ⚠️ **Risk note.** Enumerating shared homes uses `fetch_share` /
+> `fetch_share_dev`, parameters the Mi Home app sends in its internal calls.
+> go2rtc holds only a cloud account authorization, not the app's full
+> identity, so this may be flagged by risk control. Use it only for your own
+> account, read-only and at low frequency; stop if any account warning shows up.
+
 go2rtc can enumerate shared homes and their devices with the debug endpoint:
 
 ```

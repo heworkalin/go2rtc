@@ -235,6 +235,15 @@ func apiXiaomi(w http.ResponseWriter, r *http.Request) {
 //
 // It returns api.Source entries that can be added to go2rtc directly.
 //
+// NOTE (risk):
+//
+//	This uses fetch_share / fetch_share_dev, which the Mi Home app sends in its
+//	internal calls. A third-party client (go2rtc) sending them is imitating the
+//	app: we hold a cloud account authorization (sid=xiaomiio) but not the app's
+//	full identity, so it may be flagged by risk control. Use it only for your
+//	own account, read-only and at low frequency; stop if any account warning
+//	appears.
+//
 // NOTE (region):
 //
 //	Only the China Mainland Mi Home ecosystem has been tested and verified so
