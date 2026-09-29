@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,17 +22,18 @@ import (
 func Init() {
 	var cfg struct {
 		Mod struct {
-			Listen     string `yaml:"listen"`
-			Username   string `yaml:"username"`
-			Password   string `yaml:"password"`
-			LocalAuth  bool   `yaml:"local_auth"`
-			BasePath   string `yaml:"base_path"`
-			StaticDir  string `yaml:"static_dir"`
-			Origin     string `yaml:"origin"`
-			TLSListen  string `yaml:"tls_listen"`
-			TLSCert    string `yaml:"tls_cert"`
-			TLSKey     string `yaml:"tls_key"`
-			UnixListen string `yaml:"unix_listen"`
+			Listen      string   `yaml:"listen"`
+			Username    string   `yaml:"username"`
+			Password    string   `yaml:"password"`
+			LocalAuth   bool     `yaml:"local_auth"`
+			BasePath    string   `yaml:"base_path"`
+			StaticDir   string   `yaml:"static_dir"`
+			Origin      string   `yaml:"origin"`
+			TLSListen   string   `yaml:"tls_listen"`
+			TLSCert     string   `yaml:"tls_cert"`
+			TLSKey      string   `yaml:"tls_key"`
+			UnixListen  string   `yaml:"unix_listen"`
+			UnixListens []string `yaml:"unix_listens"` // multiple sockets, see below
 
 			AllowPaths []string `yaml:"allow_paths"`
 		} `yaml:"api"`
@@ -80,13 +82,84 @@ func Init() {
 	}
 
 	if cfg.Mod.UnixListen != "" {
-		_ = syscall.Unlink(cfg.Mod.UnixListen)
-		go listen("unix", cfg.Mod.UnixListen)
+		listenUnix(cfg.Mod.UnixListen)
 	}
+
+	// unix_listens allows listening on several Unix sockets at once.
+	//
+	// This is used by the Android embedded build, where the same API is
+	// exposed both on an abstract-namespace socket (no filesystem entry,
+	// isolated by uid, no 108-byte path limit) and on a filesystem socket
+	// (explicit path, chmod 0600, easier to debug).
+	//
+	// A name starting with '@' means the abstract namespace, matching the
+	// Go net package convention.
+	for _, addr := range cfg.Mod.UnixListens {
+		if addr != "" {
+			listenUnix(addr)
+		}
+	}
+
+	writeReadyFile(cfg.Mod.Listen, cfg.Mod.UnixListen, cfg.Mod.UnixListens)
 
 	// Initialize the HTTPS server
 	if cfg.Mod.TLSListen != "" && cfg.Mod.TLSCert != "" && cfg.Mod.TLSKey != "" {
 		go tlsListen("tcp", cfg.Mod.TLSListen, cfg.Mod.TLSCert, cfg.Mod.TLSKey)
+	}
+}
+
+// listenUnix starts an HTTP server on a Unix socket.
+//
+// The address may be either a filesystem path or "@name" for the Linux
+// abstract namespace. Only filesystem sockets are unlinked beforehand: an
+// abstract socket has no directory entry and unlinking it would fail.
+func listenUnix(address string) {
+	if address[0] != '@' {
+		_ = syscall.Unlink(address)
+	}
+	go listen("unix", address)
+}
+
+// readyFileName is the handshake file written into the work dir once the API
+// listeners are up. The Android app watches for it to learn which socket and
+// TCP port to talk to, instead of parsing stdout.
+const readyFileName = "g2.ready"
+
+// writeReadyFile drops a small JSON file describing the live listeners.
+//
+// It is best-effort: a failure or the absence of a work dir never stops the
+// server, and the normal (non-Android) build simply does not create the file.
+func writeReadyFile(listen, unixListen string, unixListens []string) {
+	if app.WorkDir == "" {
+		return
+	}
+
+	socks := make([]string, 0, len(unixListens)+1)
+	if unixListen != "" {
+		socks = append(socks, unixListen)
+	}
+	for _, s := range unixListens {
+		if s != "" {
+			socks = append(socks, s)
+		}
+	}
+
+	info, err := json.Marshal(map[string]any{
+		"pid":        os.Getpid(),
+		"listen":     listen,
+		"tcp_port":   Port,
+		"unix":       socks,
+		"version":    app.Version,
+		"config":     app.ConfigPath,
+		"started_at": time.Now().Unix(),
+	})
+	if err != nil {
+		return
+	}
+
+	path := filepath.Join(app.WorkDir, readyFileName)
+	if err = os.WriteFile(path, info, 0600); err != nil {
+		log.Warn().Err(err).Msg("[api] ready file")
 	}
 }
 

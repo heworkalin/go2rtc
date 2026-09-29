@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 )
@@ -14,20 +15,30 @@ var (
 	Modules    []string
 	UserAgent  string
 	ConfigPath string
-	Info       = make(map[string]any)
+	// WorkDir is the writable directory for all runtime files (config, logs,
+	// cache). It is set from the -work-dir flag or the GO2RTC_WORK_DIR
+	// environment variable.
+	//
+	// This exists for the Android embedded build: the app hands go2rtc a
+	// private directory and every file is created inside it, so nothing
+	// depends on the process current directory.
+	WorkDir string
+	Info    = make(map[string]any)
 )
 
 const usage = `Usage of go2rtc:
 
-  -c, --config   Path to config file or config string as YAML or JSON, support multiple
-  -d, --daemon   Run in background
-  -v, --version  Print version and exit
+  -c, --config    Path to config file or config string as YAML or JSON, support multiple
+  -d, --daemon    Run in background
+  -v, --version   Print version and exit
+      --work-dir  Writable directory for config/logs/cache (Android embedded)
 `
 
 func Init() {
 	var config flagConfig
 	var daemon bool
 	var version bool
+	var workDir string
 
 	flag.Var(&config, "config", "")
 	flag.Var(&config, "c", "")
@@ -35,9 +46,27 @@ func Init() {
 	flag.BoolVar(&daemon, "d", false, "")
 	flag.BoolVar(&version, "version", false, "")
 	flag.BoolVar(&version, "v", false, "")
+	flag.StringVar(&workDir, "work-dir", "", "")
 
 	flag.Usage = func() { fmt.Print(usage) }
 	flag.Parse()
+
+	// Environment variable fallback, so the Android app can pass the work
+	// directory without touching the argument list.
+	if workDir == "" {
+		workDir = os.Getenv("GO2RTC_WORK_DIR")
+	}
+	if workDir != "" {
+		if abs, err := filepath.Abs(workDir); err == nil {
+			workDir = abs
+		}
+		if err := os.MkdirAll(workDir, 0700); err != nil {
+			fmt.Println("Failed to create work dir:", err)
+			os.Exit(1)
+		}
+		WorkDir = workDir
+		Info["work_dir"] = workDir
+	}
 
 	revision, vcsTime := readRevisionTime()
 

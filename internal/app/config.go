@@ -55,7 +55,12 @@ var configs [][]byte
 
 func initConfig(confs flagConfig) {
 	if confs == nil {
-		confs = []string{"go2rtc.yaml"}
+		// default config lives inside the work dir when one is configured
+		if WorkDir != "" {
+			confs = []string{filepath.Join(WorkDir, "go2rtc.yaml")}
+		} else {
+			confs = []string{"go2rtc.yaml"}
+		}
 	}
 
 	for _, conf := range confs {
@@ -86,7 +91,11 @@ func initConfig(confs flagConfig) {
 
 	if ConfigPath != "" {
 		if !filepath.IsAbs(ConfigPath) {
-			if cwd, err := os.Getwd(); err == nil {
+			// Anchor relative config paths to the work dir when set, so the
+			// process current directory becomes irrelevant (Android).
+			if WorkDir != "" {
+				ConfigPath = filepath.Join(WorkDir, ConfigPath)
+			} else if cwd, err := os.Getwd(); err == nil {
 				ConfigPath = filepath.Join(cwd, ConfigPath)
 			}
 		}

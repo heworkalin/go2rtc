@@ -3,6 +3,7 @@ package app
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -51,6 +52,10 @@ func initLogger() {
 	case "file":
 		if path == "" {
 			path = "go2rtc.log"
+		}
+		// Anchor relative log paths to the work dir when set (Android).
+		if WorkDir != "" && !filepath.IsAbs(path) {
+			path = filepath.Join(WorkDir, path)
 		}
 		// if fail - only MemoryLog will be available
 		writer, _ = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
