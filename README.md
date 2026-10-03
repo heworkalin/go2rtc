@@ -3,537 +3,412 @@
     <img src="./website/images/logo.gif" alt="go2rtc - GitHub">
   </a>
 </h1>
+
 <p align="center">
-  <a href="https://github.com/AlexxIT/go2rtc/stargazers" target="_blank">
-    <img style="display: inline" src="https://img.shields.io/github/stars/AlexxIT/go2rtc?style=flat-square&logo=github" alt="go2rtc - GitHub Stars">
-  </a>
-  <a href="https://hub.docker.com/r/alexxit/go2rtc" target="_blank">
-    <img style="display: inline" src="https://img.shields.io/docker/pulls/alexxit/go2rtc?style=flat-square&logo=docker&logoColor=white&label=pulls" alt="go2rtc - Docker Pulls">
-  </a>
-  <a href="https://github.com/AlexxIT/go2rtc/releases" target="_blank">
-    <img style="display: inline" src="https://img.shields.io/github/downloads/AlexxIT/go2rtc/total?color=blue&style=flat-square&logo=github" alt="go2rtc - GitHub Downloads">
-  </a>
-</p>
-<p align="center">
-  <a href="https://trendshift.io/repositories/4628" target="_blank">
-    <img src="https://trendshift.io/api/badge/repositories/4628" alt="go2rtc - Trendshift"/>
-  </a>
+  <b>Android 嵌入分支</b> · <code>feature/android-embedded</code>
 </p>
 
-Ultimate camera streaming application with support for dozens formats and protocols.
+<p align="center">
+  <a href="docs/upstream/README.upstream.md">English README</a> ·
+  <a href="https://github.com/AlexxIT/go2rtc">上游项目</a> ·
+  <a href="LICENSE">MIT License</a>
+</p>
 
-- zero-dependency [small app](#go2rtc-binary) for all OS (Windows, macOS, Linux, FreeBSD)
-- zero-delay for many [supported protocols](#codecs-madness) (lowest possible streaming latency)
-- [streaming input](#streaming-input) from dozens formats and protocols
-- [streaming output](#streaming-output) in all popular formats
-- [streaming ingest](#streaming-ingest) in a number of popular formats
-- [publish](#publish-stream) any source to popular streaming services (YouTube, Telegram)
-- on-the-fly transcoding only if necessary via [FFmpeg](internal/ffmpeg/README.md)
-- [two-way audio](#two-way-audio) support for many formats
-- [streaming audio](#stream-to-camera) to all cameras with [two-way audio](#two-way-audio) support
-- mixing tracks from different sources to single stream
-- [auto-match](www/README.md#javascript-api) client-supported streaming formats and codecs
-- [streaming stats](#streaming-stats) for all active connections
-- can be [integrated to any project](#projects-using-go2rtc) or be used as [standalone app](#go2rtc-binary)
+---
 
-#### Inspired by
+## 这个分支是什么
 
-- series of streaming projects from [@deepch](https://github.com/deepch)
-- [webrtc](https://github.com/pion/webrtc) go library and whole [@pion](https://github.com/pion) team
-- [rtsp-simple-server](https://github.com/aler9/rtsp-simple-server) idea from [@aler9](https://github.com/aler9)
-- [GStreamer](https://gstreamer.freedesktop.org/) framework pipeline idea
-- [MediaSoup](https://mediasoup.org/) framework routing idea
-- HomeKit Accessory Protocol from [@brutella](https://github.com/brutella/hap)
-- creator of the project's logo [@v_novoseltsev](https://www.instagram.com/v_novoseltsev)
+上游 [go2rtc](https://github.com/AlexxIT/go2rtc) 是一个零依赖的摄像头流媒体服务，
+以独立进程运行、自带 Web 界面。它很好用，但**无法直接塞进 Android App**：
 
-<br>
-<details>
-<summary><b>Table of Contents</b></summary>
+- Android 应用没有可写的当前目录，配置文件与日志无处安放；
+- Android 不提供 `/etc/resolv.conf`，子进程 DNS 解析会退到 `[::1]:53` 然后全军覆没；
+- 要在设备上暴露 HTTP API，只能开 TCP 端口，等于对整个设备开放；
+- 自带 Web UI 会白白占掉几 MB 的 APK 体积。
 
-- [Installation](#installation)
-  - [go2rtc: Binary](#go2rtc-binary)
-  - [go2rtc: Docker](#go2rtc-docker)
-  - [go2rtc: Home Assistant add-on](#go2rtc-home-assistant-add-on)
-  - [go2rtc: Home Assistant Integration](#go2rtc-home-assistant-integration)
-  - [go2rtc: Master version](#go2rtc-master-version)
-- [Configuration](#configuration)
-- [Features](#features)
-  - [Streaming input](#streaming-input)
-  - [Streaming output](#streaming-output)
-  - [Streaming ingest](#streaming-ingest)
-  - [Two-way audio](#two-way-audio)
-  - [Stream to camera](#stream-to-camera)
-  - [Publish stream](#publish-stream)
-  - [Preload stream](#preload-stream)
-  - [Streaming stats](#streaming-stats)
-- [Codecs](#codecs)
-  - [Codecs filters](#codecs-filters)
-  - [Codecs madness](#codecs-madness)
-  - [Built-in transcoding](#built-in-transcoding)
-  - [Codecs negotiation](#codecs-negotiation)
-- [Security](#security)
-- [Projects using go2rtc](#projects-using-go2rtc)
-- [Camera experience](#camera-experience)
-- [Tips](#tips)
+本分支把 go2rtc 改造成**可作为后台服务嵌入 Android App** 的形态，
+同时**保持原有用法完全不变**（不传新参数时行为与上游一致）。
 
-</details>
+> 上游原始说明见 [English README](docs/upstream/README.upstream.md)，
+> 其余功能文档（协议、编解码、配置项等）请以该文件及 [website/](website/) 为准。
 
-## Installation
+---
 
-1. Download [binary](#go2rtc-binary) or use [Docker](#go2rtc-docker) or Home Assistant [add-on](#go2rtc-home-assistant-add-on) or [integration](#go2rtc-home-assistant-integration)
-2. Open web interface: `http://localhost:1984/`
-3. Add [streams](#streaming-input) to [config](#configuration)
+## 本分支的定位
 
-**Developers:** integrate [HTTP API](internal/api/README.md) into your smart home platform.
+需要特别说明：**本分支的「特性」是 Android 嵌入，不是新增平台支持。**
 
-### go2rtc: Binary
+| | 上游 `master` | 本分支 |
+|---|---|---|
+| `scripts/build.sh` 目标平台 | win / linux / darwin / freebsd（13 个） | **未修改，完全一致** |
+| 代码改动 | — | 仅 11 个文件（`api` / `app` / `rtsp` / `xiaomi`） |
+| 实际用途 | 独立服务，全平台 | **作为库嵌入 Android App** |
 
-Download binary for your OS from [latest release](https://github.com/AlexxIT/go2rtc/releases/):
+也就是说：上游代码本身仍然是跨平台的（Windows / macOS / Linux / FreeBSD 的构建
+脚本都被保留且可用），本分支只是在它之上**叠加**了 Android 嵌入能力。
+如果你要的是独立服务，直接看 [英文 README](docs/upstream/README.upstream.md) 即可，
+不必用本分支。
 
-| name                                                                                                            | description                                                                                                                               |
-|-----------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| [go2rtc_win64.zip](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_win64.zip)                 | Windows 10+ 64-bit                                                                                                                        |
-| [go2rtc_win32.zip](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_win32.zip)                 | Windows 10+ 32-bit                                                                                                                        |
-| [go2rtc_win_arm64.zip](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_win_arm64.zip)         | Windows ARM 64-bit                                                                                                                        |
-| [go2rtc_linux_amd64](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_amd64)             | Linux 64-bit                                                                                                                              |
-| [go2rtc_linux_i386](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_i386)               | Linux 32-bit                                                                                                                              |
-| [go2rtc_linux_arm64](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_arm64)             | Linux ARM 64-bit (ex. Raspberry 64-bit OS)                                                                                                |
-| [go2rtc_linux_arm](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_arm)                 | Linux ARM 32-bit (ex. Raspberry 32-bit OS)                                                                                                |
-| [go2rtc_linux_armv6](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_armv6)             | Linux ARMv6 (for old Raspberry 1 and Zero)                                                                                                |
-| [go2rtc_linux_mipsel](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_mipsel)           | Linux MIPS (ex. [Xiaomi Gateway 3](https://github.com/AlexxIT/XiaomiGateway3), [Wyze cameras](https://github.com/gtxaspec/wz_mini_hacks)) |
-| [go2rtc_mac_amd64.zip](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_mac_amd64.zip)         | macOS 11+ Intel 64-bit                                                                                                                    |
-| [go2rtc_mac_arm64.zip](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_mac_arm64.zip)         | macOS ARM 64-bit                                                                                                                          |
-| [go2rtc_freebsd_amd64.zip](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_freebsd_amd64.zip) | FreeBSD 64-bit                                                                                                                            |
-| [go2rtc_freebsd_arm64.zip](https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_freebsd_arm64.zip) | FreeBSD ARM 64-bit                                                                                                                        |
+---
 
-Don't forget to fix the rights `chmod +x go2rtc_xxx_xxx` on Linux and Mac.
+## 上游项目简介
 
-PS. The application is compiled with the latest versions of the Go language for maximum speed and security. Therefore, the [minimum OS versions](https://go.dev/wiki/MinimumRequirements) depend on the Go language.
+以下为上游能力概览（各特性的详细说明见
+[英文 README](docs/upstream/README.upstream.md)）：
 
-### go2rtc: Docker
+- 零依赖的**单一可执行文件**，上游支持 Windows / macOS / Linux / FreeBSD
+- 数十种**输入与输出协议**，多协议下可做到**零延迟**
+- 按需转码，仅在必要时调用 [FFmpeg](internal/ffmpeg/README.md)
+- 多种格式的**双向语音**支持
+- 混合不同来源的音视频轨到同一条流
+- 自动匹配客户端支持的格式与编解码器
+- 所有活动连接的**流统计**
+- 可**集成到任意项目**，也可作为**独立应用**运行
 
-The Docker containers [`alexxit/go2rtc`](https://hub.docker.com/r/alexxit/go2rtc) and [`ghcr.io/alexxit/go2rtc`](https://github.com/AlexxIT/go2rtc/pkgs/container/go2rtc) support multiple architectures including `386`, `amd64`, `arm/v6`, `arm/v7` and `arm64`.
-These containers offer the same functionality as the Home Assistant [add-on](#go2rtc-home-assistant-add-on) but are designed to operate independently of Home Assistant.
-It comes preinstalled with [FFmpeg](internal/ffmpeg/README.md) and [Python](internal/echo/README.md).
+---
 
-### go2rtc: Home Assistant add-on
+## 我们对它做了什么改造
 
-[![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FAlexxIT%2Fhassio-addons)
+### 改造一览
 
-1. Settings > Add-ons > Plus > Repositories > Add
-   ```
-   https://github.com/AlexxIT/hassio-addons
-   ```
-2. go2rtc > Install > Start
+| 区域 | 改动 | 原因 |
+|---|---|---|
+| `-work-dir` 参数 | 新增，也可用环境变量 `GO2RTC_WORK_DIR` 传入 | Android 没有可写的当前目录，所有运行期文件必须落在应用私有目录 |
+| `go2rtc.yaml` / `go2rtc.log` | 设置 `-work-dir` 后，相对路径**锚定到该目录** | 配置与日志不能依赖进程当前目录 |
+| `api.unix_listens` | 新增：Unix socket 列表，支持 `@name` 抽象命名空间 | 不用对整台设备开 TCP 端口即可通信 |
+| `g2.ready` 握手文件 | 新增：监听就绪后写入 `-work-dir` | 宿主进程可据此发现套接字与端口，无需解析 stdout |
+| `-dns a,b` 参数 | 新增：安装自定义 `net.Resolver` 直连指定 DNS | Android **没有** `/etc/resolv.conf`，原实现会退到 `[::1]:53` 导致全部请求失败 |
+| `no_ui` 构建标签 | 新增：`go build -tags no_ui` 去掉内置 Web UI | 省下约 4 MB APK 体积，界面由宿主 App 自己提供 |
+| `g2.ready` 端口字段 | `api_port` 与 `rtsp_port` **分开上报** | 早期实现把 API 端口写进 `tcp_port`，导致宿主把 1984 当成 RTSP 端口 |
+| 小米云支持 | 新增二维码登录、验证码/二维码文件交换模式、共享家庭枚举 | 见 [`internal/xiaomi/README.md`](internal/xiaomi/README.md) |
 
-### go2rtc: Home Assistant Integration
+### 目录结构
 
-[WebRTC Camera](https://github.com/AlexxIT/WebRTC) custom component can be used on any Home Assistant [installation](https://www.home-assistant.io/installation/), including [HassWP](https://github.com/AlexxIT/HassWP) on Windows. It can automatically download and use the latest version of go2rtc. Or it can connect to an existing version of go2rtc. Addon installation in this case is optional.
-
-### go2rtc: Master version
-
-Latest, but maybe unstable version:
-
-- Binary: [latest master build](https://nightly.link/AlexxIT/go2rtc/workflows/build/master)
-- Docker: `alexxit/go2rtc:master` or `alexxit/go2rtc:master-hardware` versions
-- Home Assistant add-on: `go2rtc master` or `go2rtc master hardware` versions
-
-## Configuration
-
-This is the `go2rtc.yaml` file in [YAML-format](https://en.wikipedia.org/wiki/YAML).
-The configuration can be changed in the [WebUI](www/README.md) at `http://localhost:1984`.
-The editor provides syntax highlighting and checking.
-
-![go2rtc webui config](website/images/webui-config.png)
-
-The simplest config looks like this:
-
-```yaml
-streams:
-  hall-camera: rtsp://admin:password@192.168.1.123/cam/realmonitor?channel=1&subtype=0
+```
+go2rtc/
+├── internal/
+│   ├── api/            # Unix socket 监听、g2.ready 握手文件
+│   ├── app/            # -work-dir / -dns、路径锚定
+│   └── xiaomi/         # 小米云集成
+├── scripts/            # Android 4 架构交叉编译工具链
+│   ├── setup-android-toolchain.sh    # 一键准备环境
+│   ├── termux-go-fetch.sh            # 取 Termux 补丁源（10 个文件）
+│   ├── patch-goroot-termux.sh        # 给官方 Go 打 Termux 补丁
+│   ├── android-cross-build.sh        # 编译 4 个 ABI
+│   └── ANDROID-4ARCH.md              # 完整技术说明
+└── docs/
+    └── upstream/       # 上游原始文档存档
 ```
 
-- by default go2rtc will search `go2rtc.yaml` in the current work directory
-- `api` server will start on default **1984 port** (TCP)
-- `rtsp` server will start on default **8554 port** (TCP)
-- `webrtc` will use port **8555** (TCP/UDP) for connections
-
-More information can be [found here](internal/app/README.md).
-
-## Features
-
-A summary table of all modules and features can be found [here](internal/README.md).
-
-**Core modules**
-
-- [`app`](internal/app/README.md) - Reading [configs](internal/app/README.md) and setting up [logs](internal/app/README.md#log).
-- [`api`](internal/api/README.md) - Handle [HTTP](internal/api/README.md) and [WebSocket](internal/api/ws/README.md) API.
-- [`streams`](internal/streams/README.md) - Handle a list of streams.
-
-### Streaming input
-
-#### public protocols
-
-- [`mpjpeg`](internal/mjpeg/README.md#mjpeg-client) - The legacy but still used [MJPEG](https://en.wikipedia.org/wiki/Motion_JPEG) protocol for real-time media transmission.
-- [`onvif`](internal/onvif/README.md#onvif-client) - A popular [ONVIF](https://en.wikipedia.org/wiki/ONVIF) protocol for receiving media in RTSP format.
-- [`rtmp`](internal/rtmp/README.md#rtmp-client) - The legacy but still used [RTMP](https://en.wikipedia.org/wiki/Real-Time_Messaging_Protocol) protocol for real-time media transmission.
-- [`rtsp`](internal/rtsp/README.md#rtsp-client) - The most common [RTSP](https://en.wikipedia.org/wiki/Real-Time_Streaming_Protocol) protocol for real-time media transmission.
-- [`webrtc`](internal/webrtc/README.md#webrtc-client) - [WebRTC](https://en.wikipedia.org/wiki/WebRTC) web-compatible protocol for real-time media transmission.
-- [`yuv4mpegpipe`](internal/http/README.md#tcp) - Raw [YUV](https://en.wikipedia.org/wiki/Y%E2%80%B2UV) frame stream with [YUV4MPEG](https://manned.org/yuv4mpeg) header.
-
-#### private protocols
-
-- [`bubble`](internal/bubble/README.md) - Some NVR from [dvr163.com](http://help.dvr163.com/) and [eseecloud.com](http://www.eseecloud.com/).
-- [`doorbird`](internal/doorbird/README.md) - [Doorbird](https://www.doorbird.com/) devices with two-way audio.
-- [`dvrip`](internal/dvrip/README.md) - DVR-IP NVR, NetSurveillance, Sofia protocol (XMeye SDK).
-- [`eseecloud`](internal/eseecloud/README.md) - Some NVR from [dvr163.com](http://help.dvr163.com/) and [eseecloud.com](http://www.eseecloud.com/).
-- [`gopro`](internal/gopro/README.md) - [GoPro](https://gopro.com/) cameras, connected via USB or Wi-Fi.
-- [`hass`](internal/hass/README.md) - Import cameras from [Home Assistant](https://www.home-assistant.io/) config files.
-- [`homekit`](internal/homekit/README.md) - Cameras with [Apple HomeKit](https://www.apple.com/home-app/accessories/) protocol.
-- [`isapi`](internal/isapi/README.md) - Two-way audio for [Hikvision ISAPI](https://tpp.hikvision.com/download/ISAPI_OTAP) protocol.
-- [`kasa`](internal/kasa/README.md) - [TP-Link Kasa](https://www.kasasmart.com/) cameras.
-- [`multitrans`](internal/multitrans/README.md) - Two-way audio for Chinese version of [TP-Link](https://www.tp-link.com.cn/) cameras.
-- [`nest`](internal/nest/README.md) - [Google Nest](https://developers.google.com/nest/device-access/supported-devices) cameras through user-unfriendly and paid APIs.
-- [`ring`](internal/ring/README.md) - Ring cameras with two-way audio support.
-- [`roborock`](internal/roborock/README.md) - [Roborock](https://roborock.com/) vacuums with cameras with two-way audio support. 
-- [`tapo`](internal/tapo/README.md) - [TP-Link Tapo](https://www.tapo.com/) cameras with two-way audio support.
-- [`vigi`](internal/tapo/README.md#tp-link-vigi) - TP-Link Vigi cameras.
-- [`tuya`](internal/tuya/README.md) - [Tuya](https://www.tuya.com/) ecosystem cameras with two-way audio support.
-- [`webtorrent`](internal/webtorrent/README.md) - Stream from another go2rtc via [WebTorrent](https://en.wikipedia.org/wiki/WebTorrent) protocol.
-- [`wyze`](internal/wyze/README.md) - [Wyze](https://wyze.com/) cameras using native P2P protocol
-- [`xiaomi`](internal/xiaomi/README.md) - [Xiaomi Mi Home](https://home.mi.com/) ecosystem cameras with two-way audio support.
-
-#### devices
-
-- [`alsa`](internal/alsa/README.md) - A [framework](https://en.wikipedia.org/wiki/Advanced_Linux_Sound_Architecture) for receiving audio from devices on Linux OS.
-- [`v4l2`](internal/v4l2/README.md) - A [framework](https://en.wikipedia.org/wiki/Video4Linux) for receiving video from devices on Linux OS.
-
-#### files
-
-- [`adts`](internal/http/README.md#tcp) - Audio stream in [AAC](https://en.wikipedia.org/wiki/Advanced_Audio_Coding) codec with Audio Data Transport Stream headers.
-- [`flv`](internal/http/README.md#tcp) - The legacy but still used [Flash Video](https://en.wikipedia.org/wiki/Flash_Video) format.
-- [`h264`](internal/http/README.md#tcp) - AVC/H.264 bitstream.
-- [`hevc`](internal/http/README.md#tcp) - HEVC/H.265 bitstream.
-- [`hls`](internal/http/README.md) - A popular [HTTP Live Streaming](https://en.wikipedia.org/wiki/HTTP_Live_Streaming) format.
-- [`mjpeg`](internal/http/README.md#tcp) - A continuous sequence of JPEG frames (without HTTP headers).
-- [`mpegts`](internal/http/README.md#tcp) - The legacy [MPEG transport stream](https://en.wikipedia.org/wiki/MPEG_transport_stream) format.
-- [`wav`](internal/http/README.md#tcp) - Audio stream in [Waveform Audio File](https://en.wikipedia.org/wiki/WAV) format.
+---
 
-#### scripts
+## 要做 Android 开发，需要准备什么
 
-- [`echo`](internal/echo/README.md) - If the source has a dynamic link, you can use a bash or python script to get it.
-- [`exec`](internal/exec/README.md) - You can run an external application (`ffmpeg`, `gstreamer`, `rpicam`, etc.) and receive a media stream from it.
-- [`expr`](internal/expr/README.md) - If the source has a dynamic link, you can use [Expr](https://github.com/expr-lang/expr) language to get it.
-- [`ffmpeg`](internal/ffmpeg/README.md) - Use [FFmpeg](https://ffmpeg.org/) as a stream source. Hardware-accelerated transcoding and streaming from USB devices are supported.
-
-#### webrtc
-
-- [`creality`](internal/webrtc/README.md#creality) - [Creality](https://www.creality.com/) 3D printer cameras.
-- [`kinesis`](internal/webrtc/README.md#kinesis) - [Amazon Kinesis](https://aws.amazon.com/kinesis/video-streams/) video streams.
-- [`openipc`](internal/webrtc/README.md#openipc) - Cameras on open-source [OpenIPC](https://openipc.org/) firmware.
-- [`switchbot`](internal/webrtc/README.md#switchbot) - [SwitchBot](https://us.switch-bot.com/) cameras.
-- [`whep`](internal/webrtc/README.md#whep) - [WebRTC/WHEP](https://datatracker.ietf.org/doc/draft-murillo-whep/) is replaced by [WebRTC/WISH](https://datatracker.ietf.org/doc/charter-ietf-wish/02/) standard for WebRTC video/audio viewers.
-- [`wyze`](internal/webrtc/README.md#wyze) - Legacy method to connect to [Wyze](https://www.wyze.com/) cameras via [docker-wyze-bridge](https://github.com/mrlt8/docker-wyze-bridge).
-
-### Streaming output
-
-- [`adts`](internal/mpeg/README.md) - Output stream in ADTS format with [AAC](https://en.wikipedia.org/wiki/Advanced_Audio_Coding) audio.
-- [`ascii`](internal/mjpeg/README.md#ascii) - Just for fun stream as [ASCII to Terminal](https://www.youtube.com/watch?v=sHj_3h_sX7M).
-- [`flv`](internal/rtmp/README.md) - Output stream in [Flash Video](https://en.wikipedia.org/wiki/Flash_Video) format.
-- [`hls`](internal/hls/README.md) - Output stream in [HTTP Live Streaming](https://en.wikipedia.org/wiki/HTTP_Live_Streaming) format.
-- [`homekit`](internal/homekit/README.md#homekit-server) - Output stream to [Apple Home](https://www.apple.com/home-app/) using [HomeKit](https://en.wikipedia.org/wiki/Apple_Home) protocol.
-- [`jpeg`](internal/mjpeg/README.md#jpeg) - Output snapshots in [JPEG](https://en.wikipedia.org/wiki/JPEG) format.
-- [`mpjpeg`](internal/mjpeg/README.md#mpjpeg) - Output a stream in [MJPEG](https://en.wikipedia.org/wiki/Motion_JPEG) format.
-- [`mp4`](internal/mp4/README.md) - Output as [MP4 stream](https://en.wikipedia.org/wiki/Progressive_download) or [Media Source Extensions](https://developer.mozilla.org/en-US/docs/Web/API/Media_Source_Extensions_API) (MSE) compatible format.
-- [`mpegts`](internal/mpeg/README.md) - Output stream in [MPEG transport stream](https://en.wikipedia.org/wiki/MPEG_transport_stream) format.
-- [`onvif`](internal/onvif/README.md#onvif-server) - Output stream using [ONVIF](https://en.wikipedia.org/wiki/ONVIF) protocol.
-- [`rtmp`](internal/rtmp/README.md#rtmp-server) - Output stream using [Real-Time Messaging](https://en.wikipedia.org/wiki/Real-Time_Messaging_Protocol) protocol.
-- [`rtsp`](internal/rtsp/README.md#rtsp-server) - Output stream using [Real-Time Streaming](https://en.wikipedia.org/wiki/Real-Time_Streaming_Protocol) protocol.
-- [`webrtc`](internal/webrtc/README.md#webrtc-server) - Output stream using [Web Real-Time Communication](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API) API.
-- [`webtorrent`](internal/webtorrent/README.md#webtorrent-server) - Output stream using [WebTorrent](https://en.wikipedia.org/wiki/WebTorrent) protocol.
-- [`yuv4mpegpipe`](internal/mjpeg/README.md#yuv4mpegpipe) - Output in raw [YUV](https://en.wikipedia.org/wiki/Y%E2%80%B2UV) frame stream with [YUV4MPEG](https://manned.org/yuv4mpeg) header.
-
-### Streaming ingest
+### 四项准备
 
-Supported for: 
-[`flv`](internal/rtmp/README.md#flv-server), 
-[`mjpeg`](internal/mjpeg/README.md#streaming-ingest), 
-[`mpegts`](internal/mpeg/README.md#streaming-ingest), 
-[`rtmp`](internal/rtmp/README.md#rtmp-server), 
-[`rtsp`](internal/rtsp/README.md#streaming-ingest), 
-[`webrtc`](internal/webrtc/README.md#streaming-ingest).
+| # | 项目 | 说明 | 是否必需 |
+|---|---|---|---|
+| 1 | **Android 应用工程** | 普通 Android 项目，含前台服务与 UI | ✅ |
+| 2 | **Android NDK** | r26+ 建议。SDK 默认**不含**，需单独安装 | ✅ |
+| 3 | **官方 Go 工具链** | 从 go.dev 下载的 Linux/macOS 版。**不能用 Termux 版** | ✅ |
+| 4 | **Termux Go 补丁源** | 仅 10 个标准库文件，约 36 KB | ⭐ 建议 |
 
-This is a feature when go2rtc expects to receive an incoming stream from an external application. The stream transmission is started and stopped by an external application.
+> **注意**：不需要 Android 设备、不需要 Termux、不需要 root。
+> 一台普通 Linux（x86_64 或 arm64）即可完成全部 4 个架构的编译。
 
-- You can push data only to an existing stream (create a stream with empty source in config).
-- You can push multiple incoming sources to the same stream.
-- You can push data to a non-empty stream, so it will have additional codecs inside.
+### 为什么不能用 Termux 的 Go
 
-### Two-way audio
+Termux 的 `go` 与 `clang` 是 **bionic ELF**（解释器为 `/system/bin/linker64`），
+只能在有 Android 系统库 + linker 的环境里执行。在纯 Linux、chroot、容器或 CI 中
+**无法运行**，所以不能当构建工具。
 
-Supported for:
-[`doorbird`](internal/doorbird/README.md), 
-[`dvrip`](internal/dvrip/README.md), 
-[`exec`](internal/exec/README.md), 
-[`isapi`](internal/isapi/README.md), 
-[`multitrans`](internal/multitrans/README.md), 
-[`ring`](internal/ring/README.md), 
-[`roborock`](internal/roborock/README.md), 
-[`rtsp`](internal/rtsp/README.md#two-way-audio), 
-[`tapo`](internal/tapo/README.md), 
-[`tuya`](internal/tuya/README.md), 
-[`webrtc`](internal/webrtc/README.md), 
-[`wyze`](internal/wyze/README.md), 
-[`xiaomi`](internal/xiaomi/README.md).
+NDK 的 clang 则是普通 Linux ELF（解释器为 `/lib/ld-linux-*.so`），
+且自带自包含的 sysroot，任何 Linux 上都能跑。
 
-Two-way audio can be used in browser with [WebRTC](internal/webrtc/README.md) technology. The browser will give access to the microphone only for HTTPS sites ([read more](https://stackoverflow.com/questions/52759992/how-to-access-camera-and-microphone-in-chrome-without-https)).
+### Termux 补丁解决什么问题
 
-### Stream to camera
+Android 没有 `/etc/resolv.conf`、`/etc/ssl/certs` 等路径。上游 Go 编译出的程序会去读
+这些不存在的路径，导致 DNS 与 HTTPS 失败。Termux 版 Go 对标准库做了 Android 适配，
+本分支把这套适配**移植到官方 Go 上**：
 
-You can play audio files or live streams on any camera with [two-way audio](#two-way-audio) support.
+| 文件 | 改动 |
+|---|---|
+| `net/conf.go` | 加 `//go:build !android` |
+| `net/dnsclient_unix.go` | 加 `//go:build !android` |
+| `net/interface_linux.go` | 加 `!android`（netlink 回退，绕过 Android 11+ 限制） |
+| `syscall/netlink_linux.go` | 加 `!android` |
+| `os/file_unix.go` | 临时目录 → `<PREFIX>/tmp` |
+| `crypto/x509/root_linux.go` | CA 证书 → `<PREFIX>/etc/tls/cert.pem` |
+| **新增 4 个文件** | `net/conf_android.go`、`net/dnsclient_android.go`、`net/interface_android.go`、`syscall/netlink_android.go` |
 
-[read more](internal/streams/README.md#stream-to-camera)
+其中 `<PREFIX>` 默认 `/data/data/com.termux/files/usr`，可通过 `--prefix` 修改。
 
-### Publish stream
+> 若你觉得 `-dns` 参数已经够用，也可以跳过补丁（`--skip-termux`）。
 
-You can publish any stream to streaming services (YouTube, Telegram, etc.) via RTMP/RTMPS.
+---
 
-[read more](internal/streams/README.md#publish-stream)
+## 编译 4 个架构
 
-### Preload stream
+```bash
+# 1. 一键准备环境（取补丁源 + 下载官方 Go + 校验 NDK）
+./scripts/setup-android-toolchain.sh \
+    -n ~/Android/Sdk/ndk/29.0.14206865 \
+    -o ./android-toolchain
 
-You can preload any stream on go2rtc start. This is useful for cameras that take a long time to start up.
-
-[read more](internal/streams/README.md#preload-stream)
-
-### Streaming stats
-
-[WebUI](www/README.md) provides detailed information about all active connections, including IP-addresses, formats, protocols, number of packets and bytes transferred. 
-Via the [HTTP API](internal/api/README.md) in [`json`](https://en.wikipedia.org/wiki/JSON) or [`dot`](https://en.wikipedia.org/wiki/DOT_(graph_description_language)) format on an interactive connection map.
-
-![go2rtc webui net](website/images/webui-net.png)
-
-## Codecs
-
-If you have questions about why video or audio is not displayed, you need to read the following sections.
-
-| Name                         | FFmpeg   | RTSP          | Aliases     |
-|------------------------------|----------|---------------|-------------|
-| Advanced Audio Coding        | `aac`    | MPEG4-GENERIC |             |
-| Advanced Video Coding        | `h264`   | H264          | AVC, H.264  |
-| G.711 PCM (A-law)            | `alaw`   | PCMA          | G711A       |
-| G.711 PCM (µ-law)            | `mulaw`  | PCMU          | G711u       |
-| High Efficiency Video Coding | `hevc`   | H265          | HEVC, H.265 |
-| Motion JPEG                  | `mpjpeg` | JPEG          |             |
-| MPEG-1 Audio Layer III       | `mp3`    | MPA           |             |
-| Opus Codec                   | `opus`   | OPUS          |             |
-| PCM signed 16-bit big-endian | `s16be`  | L16           |             |
-
-### Codecs filters
-
-go2rtc can automatically detect which codecs your device supports for [WebRTC](internal/webrtc/README.md) and [MSE](internal/mp4/README.md) technologies.
-
-But it cannot be done for [RTSP](internal/rtsp/README.md), [HTTP progressive streaming](internal/mp4/README.md), [HLS](internal/hls/README.md) technologies. 
-You can manually add a codec filter when you create a link to a stream. 
-The filters work the same for all three technologies. 
-Filters do not create a new codec, they only select the suitable codec from existing sources. 
-You can add new codecs to the stream using the [FFmpeg transcoding](internal/ffmpeg/README.md).
-
-Without filters:
-
-- RTSP will provide only the first video and only the first audio (any codec)
-- MP4 will include only compatible codecs (H264, H265, AAC)
-- HLS will output in the legacy TS format (H264 without audio)
-
-Some examples:
-
-- `rtsp://192.168.1.123:8554/camera1?mp4` - useful for recording as MP4 files (e.g. Home Assistant or Frigate)
-- `rtsp://192.168.1.123:8554/camera1?video=h264,h265&audio=aac` - full version of the filter above
-- `rtsp://192.168.1.123:8554/camera1?video=h264&audio=aac&audio=opus` - H264 video codec and two separate audio tracks
-- `rtsp://192.168.1.123:8554/camera1?video&audio=all` - any video codec and all audio codecs as separate tracks
-- `http://192.168.1.123:1984/api/stream.m3u8?src=camera1&mp4` - HLS stream with MP4 compatible codecs (HLS/fMP4)
-- `http://192.168.1.123:1984/api/stream.m3u8?src=camera1&mp4=flac` - HLS stream with PCMA/PCMU/PCM audio support (HLS/fMP4), won't work on old devices
-- `http://192.168.1.123:1984/api/stream.mp4?src=camera1&mp4=flac` - MP4 file with PCMA/PCMU/PCM audio support, won't work on old devices (ex. iOS 12)
-- `http://192.168.1.123:1984/api/stream.mp4?src=camera1&mp4=all` - MP4 file with non-standard audio codecs, won't work on some players
-
-### Codecs madness
-
-`AVC/H.264` video can be played almost anywhere. But `HEVC/H.265` has many limitations in supporting different devices and browsers.
-
-| Device                                                             | WebRTC                                  | MSE                                     | HTTP*                                        | HLS                         |
-|--------------------------------------------------------------------|-----------------------------------------|-----------------------------------------|----------------------------------------------|-----------------------------|
-| *latency*                                                          | best                                    | medium                                  | bad                                          | bad                         |
-| Desktop Chrome 136+ <br/> Desktop Edge <br/> Android Chrome 136+   | H264, H265* <br/> PCMU, PCMA <br/> OPUS | H264, H265* <br/> AAC, FLAC* <br/> OPUS | H264, H265* <br/> AAC, FLAC* <br/> OPUS, MP3 | no                          |
-| Desktop Firefox                                                    | H264 <br/> PCMU, PCMA <br/> OPUS        | H264 <br/> AAC, FLAC* <br/> OPUS        | H264 <br/> AAC, FLAC* <br/> OPUS             | no                          |
-| Desktop Safari 14+ <br/> iPad Safari 14+ <br/> iPhone Safari 17.1+ | H264, H265* <br/> PCMU, PCMA <br/> OPUS | H264, H265 <br/> AAC, FLAC*             | **no!**                                      | H264, H265 <br/> AAC, FLAC* |
-| iPhone Safari 14+                                                  | H264, H265* <br/> PCMU, PCMA <br/> OPUS | **no!**                                 | **no!**                                      | H264, H265 <br/> AAC, FLAC* |
-| macOS [Hass App][1]                                                | no                                      | no                                      | no                                           | H264, H265 <br/> AAC, FLAC* |
-
-[1]: https://apps.apple.com/app/home-assistant/id1099568401
-
-- `HTTP*` - HTTP Progressive Streaming, not related to [progressive download](https://en.wikipedia.org/wiki/Progressive_download), because the file has no size and no end
-- `WebRTC H265` - supported in [Chrome 136+](https://developer.chrome.com/release-notes/136), supported in [Safari 18+](https://developer.apple.com/documentation/safari-release-notes/safari-18-release-notes)
-- `MSE iPhone` - supported in [iOS 17.1+](https://webkit.org/blog/14735/webkit-features-in-safari-17-1/)
-
-**Audio**
-
-- go2rtc supports [automatic repackaging](#built-in-transcoding) of `PCMA/PCMU/PCM` codecs into `FLAC` for MSE/MP4/HLS so they'll work almost anywhere
-- **WebRTC** audio codecs: `PCMU/8000`, `PCMA/8000`, `OPUS/48000/2`
-- `OPUS` and `MP3` inside **MP4** are part of the standard, but some players do not support them anyway (especially Apple)
-
-**Apple devices**
-
-- all Apple devices don't support HTTP progressive streaming
-- old iPhone firmwares don't support MSE technology because it competes with the HTTP Live Streaming (HLS) technology, invented by Apple
-- HLS is the worst technology for **live** streaming, it still exists only because of iPhones
-
-### Built-in transcoding
-
-There are no plans to embed complex transcoding algorithms inside go2rtc. 
-[FFmpeg source](internal/ffmpeg/README.md) does a great job with this. 
-Including [hardware acceleration](https://github.com/AlexxIT/go2rtc/wiki/Hardware-acceleration) support.
-
-But go2rtc has some simple algorithms. They are turned on automatically; you do not need to set them up additionally.
-
-**PCM for MSE/MP4/HLS**
-
-Go2rtc can pack `PCMA`, `PCMU` and `PCM` codecs into an MP4 container so that they work in all browsers and all built-in players on modern devices. Including Apple QuickTime:
-
-```text
-PCMA/PCMU => PCM => FLAC => MSE/MP4/HLS
+# 2. 编译 4 个 ABI
+./scripts/android-cross-build.sh \
+    -n ~/Android/Sdk/ndk/29.0.14206865 \
+    -g ./android-toolchain/goroot \
+    -o ./android-out --tags no_ui
 ```
 
-**Resample PCMA/PCMU for WebRTC**
+产物放入 APK：
 
-By default WebRTC supports only `PCMA/8000` and `PCMU/8000`. But go2rtc can automatically resample PCMA and PCMU codecs with a different sample rate. Also, go2rtc can transcode `PCM` codec to `PCMA/8000`, so WebRTC can play it:
-
-```text
-PCM/xxx => PCMA/8000 => WebRTC
-PCMA/xxx => PCMA/8000 => WebRTC
-PCMU/xxx => PCMU/8000 => WebRTC
+```
+android-out/libgo2rtc_arm64-v8a.so   -> jniLibs/arm64-v8a/
+android-out/libgo2rtc_armeabi-v7a.so -> jniLibs/armeabi-v7a/
+android-out/libgo2rtc_x86.so         -> jniLibs/x86/
+android-out/libgo2rtc_x86_64.so      -> jniLibs/x86_64/
 ```
 
-**Important**
+### 两个必须注意的坑
 
-- FLAC codec not supported in an RTSP stream. If you are using Frigate or Home Assistant for recording MP4 files with PCMA/PCMU/PCM audio, you should set up transcoding to the AAC codec.
-- PCMA and PCMU are VERY low-quality codecs. They support only 256! different sounds. Use them only when you have no other options.
+1. **文件名与位置**
+   必须叫 `lib*.so` 且放在 `jniLibs/<abi>/`，并在 `build.gradle` 设
+   `useLegacyPackaging = true`。否则 Android 不会把它解压到 `nativeLibraryDir`，
+   而只有那里才允许执行。
 
-### Codecs negotiation
+2. **DNS**
+   Android 没有 `/etc/resolv.conf`。两种解法二选一：
+   - 运行时传 `-dns`，值取自 `ConnectivityManager.getLinkProperties().getDnsServers()`；
+   - 或用 Termux 补丁源编译，让二进制去读 `<PREFIX>/etc/resolv.conf`。
 
-For example, you want to watch an RTSP stream from a [Dahua IPC-K42](https://www.dahuasecurity.com/fr/products/All-Products/Network-Cameras/Wireless-Series/Wi-Fi-Series/4MP/IPC-K42) camera in your Chrome browser.
+完整技术说明（含"为什么只有 arm64 能纯静态"等）见
+[`scripts/ANDROID-4ARCH.md`](scripts/ANDROID-4ARCH.md)。
 
-- this camera supports two-way audio standard **ONVIF Profile T**
-- this camera supports codecs **H264, H265** for sending video, and you select `H264` in camera settings
-- this camera supports codecs **AAC, PCMU, PCMA** for sending audio (from mic), and you select `AAC/16000` in camera settings
-- this camera supports codecs **AAC, PCMU, PCMA** for receiving audio (to speaker), you don't need to select them
-- your browser supports codecs **H264, VP8, VP9, AV1** for receiving video, you don't need to select them
-- your browser supports codecs **OPUS, PCMU, PCMA** for sending and receiving audio, you don't need to select them
-- you can't get the camera audio directly because its audio codecs don't match your browser's codecs
-    - so you decide to use transcoding via FFmpeg and add this setting to the config YAML file
-    - you have chosen `OPUS/48000/2` codec, because it is higher quality than the `PCMU/8000` or `PCMA/8000`
+---
 
-Now you have a stream with two sources - **RTSP and FFmpeg**:
+## 通信机制
 
-```yaml
-streams:
-  dahua:
-    - rtsp://admin:password@192.168.1.123/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif
-    - ffmpeg:rtsp://admin:password@192.168.1.123/cam/realmonitor?channel=1&subtype=0#audio=opus
+### 架构图
+
+```
+┌─────────────────────────────────────────────┐
+│           Android App（UI + 前台服务）        │
+│                                             │
+│   ① 拉起子进程       ② 读取 g2.ready         │
+└──────────┬──────────────────┬───────────────┘
+           │                  │
+           ▼                  │
+┌──────────────────────────┐  │
+│   go2rtc 子进程           │◄─┘
+│                          │
+│  ├─ Unix socket @go2rtc_api                （抽象命名空间，按 uid 隔离）
+│  ├─ Unix socket <workdir>/http.sock        （文件系统，chmod 0600）
+│  ├─ TCP :1984                              （可选，需配 api.listen）
+│  └─ RTSP :8554                             （播放器连这里）
+└──────────────────────────┘
 ```
 
-**go2rtc** automatically matches codecs for your browser across all of your stream sources. This is called **multi-source two-way codec negotiation**, and it's one of the main features of this app.
+### 完整流程
 
-**PS.** You can select `PCMU` or `PCMA` codec in camera settings and not use transcoding at all. Or you can select `AAC` codec for main stream and `PCMU` codec for second stream and add both RTSP to YAML config, this also will work fine.
+1. App 用 `--work-dir <私有目录>` 与 `--dns <从 ConnectivityManager 读到的 DNS>`
+   启动 `libgo2rtc.so`；
+2. go2rtc 创建目录、写配置、开始监听；
+3. 宿主轮询 `g2.ready`，拿到套接字路径、`api_port`、`rtsp_port`；
+4. HTTP 请求走 Unix socket（明文，无 TLS）或 TCP；
+5. 播放器连 `rtsp://127.0.0.1:<rtsp_port>/<stream>`。
 
-## Security
+### g2.ready 文件格式
 
-> [!IMPORTANT]
-> If an attacker gains access to the API, you are in danger. Through the API, an attacker can use insecure sources such as echo and exec. And get full access to your server.
+监听就绪后写入，可用轮询或 `FileObserver` 监听：
 
-For maximum (paranoid) security, go2rtc has special settings:
-
-```yaml
-app:
-  # use only allowed modules
-  modules: [api, rtsp, webrtc, exec, ffmpeg, mjpeg]
-
-api:
-  # use only allowed API paths
-  allow_paths: [/api, /api/streams, /api/webrtc, /api/frame.jpeg]
-  # enable auth for localhost (used together with username and password)
-  local_auth: true
-
-exec:
-  # use only allowed exec paths
-  allow_paths: [ffmpeg]
+```json
+{
+  "pid": 12345,
+  "listen": ":1984",
+  "api_port": 1984,
+  "rtsp_listen": ":8554",
+  "rtsp_port": 8554,
+  "unix": ["@go2rtc_api", "/data/user/0/com.example.app/files/go2rtc/http.sock"],
+  "version": "1.9.4",
+  "config": "/data/user/0/com.example.app/files/go2rtc/go2rtc.yaml",
+  "started_at": 1730000000
+}
 ```
 
-By default, `go2rtc` starts the Web interface on port `1984` and RTSP on port `8554`, as well as uses port `8555` for WebRTC connections. The three ports are accessible from your local network. So anyone on your local network can watch video from your cameras without authorization. The same rule applies to the Home Assistant add-on.
+> `api_port` 与 `rtsp_port` **故意分开**。早期版本只上报 `tcp_port`，
+> 宿主会把 API 端口 1984 误当成 RTSP 端点。
 
-This is not a problem if you trust your local network as much as I do. But you can change this behaviour with a `go2rtc.yaml` config:
+### 内嵌场景的最小配置
 
 ```yaml
 api:
-  listen: "127.0.0.1:1984" # localhost
-
-rtsp:
-  listen: "127.0.0.1:8554" # localhost
-
-webrtc:
-  listen: ":8555" # external TCP/UDP port
+  unix_listens:
+    - "@go2rtc_api"                          # 抽象命名空间：重启不残留、无 108 字节路径限制
+    - "/data/user/0/com.example.app/files/go2rtc/http.sock"
+  # listen: "127.0.0.1:1984"                 # 可选：需要 TCP 时才开
+log:
+  level: info
 ```
 
-- local access to RTSP is not a problem for [FFmpeg](internal/ffmpeg/README.md) integration, because it runs locally on your server
-- local access to API is not a problem for the [Home Assistant add-on](#go2rtc-home-assistant-add-on), because Home Assistant runs locally on the same server, and the add-on web UI is protected with Home Assistant authorization ([Ingress feature](https://www.home-assistant.io/blog/2019/04/15/hassio-ingress/))
-- external access to WebRTC TCP port is not a problem, because it is used only for transmitting encrypted media data
-    - anyway you need to open this port to your local network and to the Internet for WebRTC to work
+`streams:` 按上游语法正常配置即可。由于设置了 `-work-dir`，
+相对路径 `-c go2rtc.yaml` 会解析为 `<work-dir>/go2rtc.yaml`。
 
-If you need web interface protection without the Home Assistant add-on, you need to use a reverse proxy, like [Nginx](https://nginx.org/), [Caddy](https://caddyserver.com/), etc.
+### 命令行参数速查（本分支新增）
 
-PS. Additionally, WebRTC will try to use the 8555 UDP port to transmit encrypted media. It works without problems on the local network, and sometimes also works for external access, even if you haven't opened this port on your router ([read more](https://en.wikipedia.org/wiki/UDP_hole_punching)). But for stable external WebRTC access, you need to open the 8555 port on your router for both TCP and UDP.
+```
+      --work-dir DIR   配置/日志/缓存的写入目录（Android 嵌入选它）
+      --dns a,b,c      DNS 服务器列表（Android 无 resolv.conf 时必传）
+```
 
-## Projects using go2rtc
+配置文件新增项：
 
-- [Home Assistant](https://www.home-assistant.io/) [2024.11+](https://www.home-assistant.io/integrations/go2rtc/) - top open-source smart home project
-- [Frigate](https://frigate.video/) [0.12+](https://docs.frigate.video/guides/configuring_go2rtc/) - open-source NVR built around real-time AI object detection
-- [camera.ui](https://www.cameraui.com/) - The modern, local-first platform for professional video surveillance.
-- [Advanced Camera Card](https://github.com/dermotduffy/advanced-camera-card) - custom card for Home Assistant
-- [OpenIPC](https://github.com/OpenIPC/firmware/tree/master/general/package/go2rtc) - alternative IP camera firmware from an open community
-- [wz_mini_hacks](https://github.com/gtxaspec/wz_mini_hacks) - custom firmware for Wyze cameras
-- [EufyP2PStream](https://github.com/oischinger/eufyp2pstream) - a small project that provides a video/audio stream from Eufy cameras that don't directly support RTSP
-- [ioBroker.euSec](https://github.com/bropat/ioBroker.eusec) - [ioBroker](https://www.iobroker.net/) adapter for controlling Eufy security devices
-- [MMM-go2rtc](https://github.com/Anonym-tsk/MMM-go2rtc) - MagicMirror² module
-- [ring-mqtt](https://github.com/tsightler/ring-mqtt) - Ring-to-MQTT bridge
-- [lightNVR](https://github.com/opensensor/lightNVR)
+```yaml
+api:
+  unix_listen: "..."      # 原来就支持，单个 socket
+  unix_listens: [...]     # 本分支新增，可监听多个
+```
 
-**Distributions**
+---
 
-- [Alpine Linux](https://pkgs.alpinelinux.org/packages?name=go2rtc)
-- [Arch User Repository](https://linux-packages.com/aur/package/go2rtc)
-- [Gentoo](https://github.com/inode64/inode64-overlay/tree/main/media-video/go2rtc)
-- [NixOS](https://search.nixos.org/packages?query=go2rtc)
-- [Proxmox Helper Scripts](https://github.com/community-scripts/ProxmoxVE/)
-- [QNAP](https://www.myqnap.org/product/go2rtc/)
-- [Synology NAS](https://synocommunity.com/package/go2rtc)
-- [Unraid](https://unraid.net/community/apps?q=go2rtc)
+## 编译选项
 
-## Camera experience
+### setup-android-toolchain.sh
 
-- [Dahua](https://www.dahuasecurity.com/) - reference implementation streaming protocols, a lot of settings, high stream quality, multiple streaming clients
-- [EZVIZ](https://www.ezviz.com/) - awful RTSP protocol implementation, many bugs in SDP
-- [Hikvision](https://www.hikvision.com/) - a lot of proprietary streaming technologies
-- [Reolink](https://reolink.com/) - some models have an awful, unusable RTSP implementation and not the best RTMP alternative (I recommend that you contact Reolink support for new firmware), few settings
-- [Sonoff](https://sonoff.tech/) - very low stream quality, no settings, not the best protocol implementation
-- [TP-Link](https://www.tp-link.com/) - few streaming clients, packet loss?
-- Cheap noname cameras, Wyze Cams, Xiaomi cameras with hacks (usually have `/live/ch00_1` in RTSP URL) - awful but usable RTSP protocol implementation, low stream quality, few settings, packet loss?
+```
+-n, --ndk DIR        NDK 路径
+-o, --out DIR        工作目录
+-G, --go-version V   Go 版本（默认取 Termux 包同版本）
+-m, --mirror URL     Go 下载镜像（如 https://golang.google.cn/dl）
+--skip-termux        不打 Termux 补丁
+--skip-go            不下载 Go
+--check              只做环境检查
+```
 
-## Tips
+### android-cross-build.sh
 
-**Using apps for low RTSP delay**
+```
+-n, --ndk DIR        NDK 路径（默认自动探测）
+-o, --out DIR        输出目录
+-t, --api NUM        Android API level（默认 24）
+-a, --arch LIST      目标 ABI（默认全部 4 个）
+-g, --goroot DIR     指定 GOROOT
+-p, --package SPEC   要编译的包（默认 .）
+--tags TAGS          build tags（Android 建议 no_ui）
+--static-arm64       arm64 用 CGO_ENABLED=0 出纯静态产物
+--check              只检查环境
+```
 
-- `ffplay -fflags nobuffer -flags low_delay "rtsp://192.168.1.123:8554/camera1"`
-- VLC > Preferences > Input / Codecs > Default Caching Level: Lowest Latency
+---
 
-**Snapshots to Telegram**
+## 已知限制
 
-[read more](https://github.com/AlexxIT/go2rtc/wiki/Snapshot-to-Telegram)
+1. **Go 版本必须与 Termux 补丁同版本**
+   Termux 1.27.1 的 `dnsclient_android.go` 用到 `internal/strconv`（Go 1.26+ 才有）。
+   若用 Go 1.25 打包，会报 `package internal/strconv is not in std`。
+
+2. **只有 `android/arm64` 能纯静态编译**
+   Go 工具链对 `android/arm`、`386`、`amd64` 硬编码要求 external linking
+   （即 `CGO_ENABLED=1`），否则报 `cannot find runtime/cgo`。这是 Go 的设计，
+   不是环境缺失。因此 4 架构统一走 `CGO_ENABLED=1` + NDK。
+
+3. **NDK 版本由使用者自备**
+   不同 NDK 版本的 sysroot 与 clang 内容不同，本项目不预设。NDK r26+ 均可。
+
+---
+
+## 许可
+
+本仓库是第三方派生分支，代码分三层，版权与许可分别如下：
+
+| 层 | 内容 | 版权 | 许可 |
+|---|---|---|---|
+| 1 | 上游 go2rtc 原有代码 | © 2022 Alexey Khit | MIT（[LICENSE](LICENSE)） |
+| 2 | 移植的小米 QR 登录流程 | © 2020 Piotr Machowski | MIT |
+| 3 | **本分支的 Android 嵌入改动** | © 2026 heworkalin | MIT |
+
+三层许可条款完全相同（均为 MIT），可自由使用、修改、分发，
+但**必须保留上述全部版权声明**。
+
+完整说明见 [`LICENSE-ANDROID`](LICENSE-ANDROID)，其中包含：
+- 本分支改动的逐文件清单
+- QR 登录流程的移植映射关系（[Xiaomi-cloud-tokens-extractor](https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor)，MIT）
+- 第三方组件（Go 标准库补丁、Termux 包、NDK）的许可
+
+### 定位说明
+
+我们**不是小米官方团队，也不是 go2rtc 上游维护者**，
+只是第三方 fork 的维护者，目标是让这个分支在自己的场景下更好用。
+
+---
+
+## 依赖组件的上游声明
+
+本分支的构建流程会下载两个外部组件，它们各自的声明如下。
+
+### 1. Termux golang 包（仅用于提取 10 个补丁文件）
+
+来自 `termux-packages/packages/golang/build.sh` 与 apt 元数据的原始声明：
+
+| 字段 | 值 |
+|---|---|
+| `TERMUX_PKG_LICENSE` | **BSD 3-Clause** |
+| `TERMUX_PKG_HOMEPAGE` | `https://go.dev/` |
+| `TERMUX_PKG_SRCURL` | `https://go.dev/dl/go1.27.1.src.tar.gz`（官方源码，未改造） |
+| `TERMUX_PKG_DEPENDS` | **`clang`** |
+| `TERMUX_PKG_ANTI_BUILD_DEPENDS` | `clang` |
+| `TERMUX_PKG_RECOMMENDS` | **`resolv-conf`** |
+| `TERMUX_PKG_MAINTAINER` | `@termux` |
+| apt `Depends` / `Recommends` | `clang` / `resolv-conf` |
+
+**这些声明对本方案的实际影响：**
+
+| 上游要求 | 我们是否需要 | 说明 |
+|---|---|---|
+| `Depends: clang` | ❌ 不需要 | 这是 Termux 运行时的依赖。我们不执行 Termux 的 `go` 二进制，而是用官方 Go + NDK clang |
+| `Recommends: resolv-conf` | ⚠️ **相关** | 这正是 Termux 提供 `<PREFIX>/etc/resolv.conf` 的包。我们的补丁让二进制去读它，因此**宿主 App 需自行写入该文件**，或改用 `-dns` 参数 |
+| `License: BSD 3-Clause` | ⚠️ **需遵守** | 见下 |
+
+**关于补丁脚本的许可**：`termux-packages/LICENSE.md` 明确写明
+"The scripts and patches to build each package is licensed under the same license
+as the actual package"，因此 golang 包的补丁脚本**同样是 BSD 3-Clause**，
+并非 GPL（GPL-3.0 仅适用于 `root-packages/`、`disabled-packages/`，本方案不涉及）。
+
+我们**没有复制**这些脚本，而是照着其行为自行实现了等效逻辑。
+
+**关于提取出的源码文件**：`patch-src/` 里的 10 个文件均保留原始版权头：
+
+```go
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+```
+
+若要把它们提交进仓库再分发，需一并保留这些头部。
+
+### 2. 官方 Go 工具链
+
+从 `go.dev/dl/` 下载，同样为 **BSD 3-Clause**，版权归 The Go Authors。
+本方案只使用官方包，不做任何修改（除应用上述补丁）。
+
+### 3. Android NDK
+
+由使用者自行安装，受其自带许可约束（`$NDK/NOTICE`），本仓库不再分发。
+
+---
+
+## 致谢
+
+本项目基于 **[AlexxIT/go2rtc](https://github.com/AlexxIT/go2rtc)** 开发（MIT，© 2022 Alexey Khit）。
+
+小米 QR 扫码登录流程**移植自** **[Xiaomi-cloud-tokens-extractor](https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor)**
+（MIT，© 2020 Piotr Machowski），对应其 `QrCodeXiaomiCloudConnector`
+（`token_extractor.py` 第 605–755 行）。
+移植映射与差异记录见 [`docs/migration/qr-login-migration-guide.md`](docs/migration/qr-login-migration-guide.md)。
+
+- 上游仓库：<https://github.com/AlexxIT/go2rtc>
+- 上游 README（英文）：[`docs/upstream/README.upstream.md`](docs/upstream/README.upstream.md)
+- 上游分支：`upstream/master`
+
+许可详情见 [LICENSE](LICENSE) 与 [LICENSE-ANDROID](LICENSE-ANDROID)。

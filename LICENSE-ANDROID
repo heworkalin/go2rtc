@@ -1,0 +1,178 @@
+Android 分支授权说明 / License notice for the Android branch
+==============================================================
+
+本仓库是 AlexxIT/go2rtc 的第三方派生分支（fork），
+分支名 feature/android-embedded，用途是把 go2rtc 作为后台服务嵌入 Android App。
+
+本文件说明本分支改动的授权情况。上游代码的原始授权见 LICENSE（一字未改）。
+
+
+--------------------------------------------------------------------------
+一、授权概览 / Overview
+--------------------------------------------------------------------------
+
+本仓库代码分三层，版权与授权分别如下：
+
+  ┌────┬──────────────────────────────────┬───────────────────────┬──────────────┐
+  │ 层 │ 内容                             │ 版权                  │ 许可         │
+  ├────┼──────────────────────────────────┼───────────────────────┼──────────────┤
+  │ 1  │ 上游 go2rtc 原有代码             │ © 2022 Alexey Khit    │ MIT          │
+  │ 2  │ 移植的小米 QR 登录流程           │ © 2020 Piotr Machowski│ MIT          │
+  │ 3  │ 本分支的 Android 嵌入改动        │ © 2026 heworkalin     │ MIT          │
+  └────┴──────────────────────────────────┴───────────────────────┴──────────────┘
+
+三层许可条款完全相同（均为 MIT），可自由使用、修改、分发，
+但必须保留上述全部版权声明与本许可声明。
+
+
+--------------------------------------------------------------------------
+二、第 1 层：上游 go2rtc
+--------------------------------------------------------------------------
+
+  Copyright (c) 2022 Alexey Khit
+  License: MIT
+  仓库: https://github.com/AlexxIT/go2rtc
+  完整条款: 见本仓库根目录 LICENSE
+
+说明：
+  上游代码整体沿用 MIT，未作任何许可变更。
+  本分支对上游文件的所有修改同样以 MIT 授权。
+
+
+--------------------------------------------------------------------------
+三、第 2 层：移植的小米 QR 登录流程
+--------------------------------------------------------------------------
+
+  Copyright (c) 2020 Piotr Machowski
+  License: MIT
+  仓库: https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor
+  文件: token_extractor.py
+  范围: 类 QrCodeXiaomiCloudConnector，第 605–755 行
+
+说明：
+  本分支的 QR Code 扫码登录功能（pkg/xiaomi/cloud_qr.go）是上述 Python 代码
+  的 **逐步骤移植（port）**，而非仅参考思路。
+
+  Python 的 QrCodeXiaomiCloudConnector 四个方法与本分支的 Go 实现一一对应：
+
+    login_step_1()  ->  (*Cloud).LoginQR()    取 loginUrl / qr / lp / timeout
+    login_step_2()  ->  (*Cloud).QRImage()    取二维码图片字节
+    login_step_3()  ->  (*Cloud).QRWait()     阻塞长轮询，直到扫码或超时
+    login_step_4()  ->  (*Cloud).QRFinish()   跟随 location 取 serviceToken
+
+  移植内容包括控制流程、请求参数构造、轮询重试语义（10s/次，
+  累计受 timeout 约束，超时不自动重取二维码），以及
+  "&&&START&&&" 前缀处理等细节。
+
+  因语言不同，代码为用 Go 重写而非直接复制文本；
+  但逻辑映射关系是明确的，可在 pkg/xiaomi/cloud_qr.go 的文件头注释中
+  看到同样的说明。
+
+  移植过程及与 Python 源码的逐项差异记录在：
+    docs/migration/qr-login-migration-guide.md
+  （含一份对照源码的勘误表，记录了 10 处早期文档与 Python 实际行为的偏差）
+
+  该来源同样为 MIT 许可，与本项目兼容。
+  若你需再分发本分支，请一并保留上述版权声明。
+
+
+--------------------------------------------------------------------------
+四、第 3 层：本分支的 Android 嵌入改动
+--------------------------------------------------------------------------
+
+  Copyright (c) 2026 heworkalin <2701814400@qq.com>
+  License: MIT
+
+改动清单：
+
+  internal/app/app.go         -work-dir 参数、GO2RTC_WORK_DIR 环境变量、
+                              -dns 参数与 net.Resolver 覆盖
+  internal/app/config.go      相对配置路径锚定到 work-dir
+  internal/app/log.go         相对日志路径锚定到 work-dir
+  internal/api/api.go         unix_listens 多 Unix socket（含 @ 抽象命名空间）、
+                              g2.ready 握手文件、api_port / rtsp_port 上报
+  internal/api/static.go      UI 静态资源的构建标签调整
+  internal/api/static_no_ui.go  no_ui 构建标签（去掉内置 Web UI）
+  internal/rtsp/rtsp.go       通过 api.RegisterRTSPListen 上报实际监听地址
+  internal/xiaomi/xiaomi.go   QR 登录 API 端点与文件交换模式
+  pkg/xiaomi/cloud_qr.go      QR Code 扫码登录 4 步实现
+  pkg/xiaomi/shared_home.go   共享家庭枚举
+  scripts/*.sh                Android 4 架构交叉编译工具链
+  docs/                       文档
+
+以上改动以 MIT 授权。你可以自由使用、修改、再分发，
+但需保留本文件与 LICENSE 中的版权声明。
+
+
+--------------------------------------------------------------------------
+五、第三方组件 / Third-party components
+--------------------------------------------------------------------------
+
+本项目的构建流程会取得以下外部组件。它们不随本仓库分发，
+各自受其原始许可约束：
+
+  1. Go 标准库补丁文件（scripts/ 提取的 10 个 *_android.go）
+     Copyright The Go Authors
+     License: BSD 3-Clause
+     说明: 这些文件由 Termux 的 golang 包提供，源自 go.dev 官方源码。
+           termux-packages/LICENSE.md 明确 golang 包的补丁脚本
+           "licensed under the same license as the actual package"，
+           即 BSD 3-Clause（非 GPL）。
+           提取出的文件均保留原始版权头，若再分发需一并保留。
+
+  2. Termux golang 包（构建期下载，仅用于提取上述补丁文件）
+     Maintainer: @termux
+     License: BSD 3-Clause
+     Homepage: https://go.dev/
+     上游声明: TERMUX_PKG_DEPENDS="clang"
+               TERMUX_PKG_RECOMMENDS="resolv-conf"
+     说明: 这些是 Termux 运行时的依赖声明。
+           本方案不执行 Termux 的 go 二进制，因此不需要 clang。
+           但 resolv-conf 相关：补丁让二进制读取 <PREFIX>/etc/resolv.conf，
+           宿主 App 需自行写入该文件，或改用 -dns 参数。
+
+  3. 官方 Go 工具链（go.dev/dl）
+     Copyright The Go Authors
+     License: BSD 3-Clause
+
+  4. Android NDK
+     Copyright Google LLC
+     License: 见 NDK 安装目录下的 NOTICE 文件
+     说明: 由使用者自行安装，本仓库不分发。
+
+
+--------------------------------------------------------------------------
+六、MIT 许可全文 / Full MIT text
+--------------------------------------------------------------------------
+
+以下条款适用于本文件所述的第 1、2、3 层内容（若与根目录 LICENSE 有冲突，
+以 LICENSE 为准，因其为上游原始文件）：
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+
+--------------------------------------------------------------------------
+    本分支维护者 / Branch maintainer
+    heworkalin <2701814400@qq.com>
+    https://github.com/heworkalin
+
+    定位说明 / Positioning
+    我们不是小米官方团队，也不是 go2rtc 上游维护者，
+    只是第三方 fork 的维护者，目标是让这个分支在自己的场景下更好用。
+--------------------------------------------------------------------------
