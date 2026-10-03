@@ -1,8 +1,4 @@
-<h1 align="center">
-  <a href="https://github.com/AlexxIT/go2rtc">
-    <img src="./website/images/logo.gif" alt="go2rtc - GitHub">
-  </a>
-</h1>
+<h1 align="center">go2rtc</h1>
 
 <p align="center">
   <b>Android 嵌入分支</b> · <code>feature/android-embedded</code>

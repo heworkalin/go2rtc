@@ -1,6 +1,12 @@
+<!--
+  Upstream README archive (upstream/master).
+  Kept for reference only; the original animated logo was replaced with a
+  text heading so the document stays readable, and because the relative
+  image path below no longer resolves from this directory.
+-->
 <h1 align="center">
   <a href="https://github.com/AlexxIT/go2rtc">
-    <img src="./website/images/logo.gif" alt="go2rtc - GitHub">
+    go2rtc
   </a>
 </h1>
 <p align="center">
