@@ -5,8 +5,9 @@
 </p>
 
 <p align="center">
-  <a href="docs/upstream/README.upstream.md">English README</a> ·
+  <a href="README.en.md">English</a> ·
   <a href="https://github.com/AlexxIT/go2rtc">上游项目</a> ·
+  <a href="docs/upstream/README.upstream.md">上游原始 README</a> ·
   <a href="LICENSE">MIT License</a>
 </p>
 
@@ -42,8 +43,9 @@
 本分支把 go2rtc 改造成**可作为后台服务嵌入 Android App** 的形态，
 同时**保持原有用法完全不变**（不传新参数时行为与上游一致）。
 
-> 上游原始说明见 [English README](docs/upstream/README.upstream.md)，
-> 其余功能文档（协议、编解码、配置项等）请以该文件及 [website/](website/) 为准。
+> 上游原始说明见 [docs/upstream/README.upstream.md](docs/upstream/README.upstream.md)
+> （即上游 master 的 README 存档），本分支的英文说明见 [README.en.md](README.en.md)。
+> 其余功能文档（协议、编解码、配置项等）请以上游文档及 [website/](website/) 为准。
 
 ---
 
@@ -59,15 +61,15 @@
 
 也就是说：上游代码本身仍然是跨平台的（Windows / macOS / Linux / FreeBSD 的构建
 脚本都被保留且可用），本分支只是在它之上**叠加**了 Android 嵌入能力。
-如果你要的是独立服务，直接看 [英文 README](docs/upstream/README.upstream.md) 即可，
+如果你要的是独立服务，直接看上游 README 即可，
 不必用本分支。
 
 ---
 
 ## 上游项目简介
 
-以下为上游能力概览（各特性的详细说明见
-[英文 README](docs/upstream/README.upstream.md)）：
+以下为上游能力概览（英文说明见 [README.en.md](README.en.md)，
+上游原始文档见 [docs/upstream/README.upstream.md](docs/upstream/README.upstream.md)）：
 
 - 零依赖的**单一可执行文件**，上游支持 Windows / macOS / Linux / FreeBSD
 - 数十种**输入与输出协议**，多协议下可做到**零延迟**
@@ -421,7 +423,8 @@ as the actual package"，因此 golang 包的补丁脚本**同样是 BSD 3-Claus
 移植映射与差异记录见 [`docs/migration/qr-login-migration-guide.md`](docs/migration/qr-login-migration-guide.md)。
 
 - 上游仓库：<https://github.com/AlexxIT/go2rtc>
-- 上游 README（英文）：[`docs/upstream/README.upstream.md`](docs/upstream/README.upstream.md)
+- 本分支英文说明：[`README.en.md`](README.en.md)
+- 上游原始 README 存档：[`docs/upstream/README.upstream.md`](docs/upstream/README.upstream.md)
 - 上游分支：`upstream/master`
 
 许可详情见 [LICENSE](LICENSE) 与 [LICENSE-ANDROID](LICENSE-ANDROID)。

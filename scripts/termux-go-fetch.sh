@@ -1,78 +1,84 @@
 #!/usr/bin/env bash
 #
-# termux-go-fetch.sh — 只下载"必要"的 Termux Go 资源（轻量版）
-# termux-go-fetch.sh — Fetch only the ESSENTIAL Termux Go resources (lightweight)
+# termux-go-fetch.sh - fetch only the ESSENTIAL Termux Go resources
 #
-# ═══════════════════════════════════════════════════════════════════════════
-# 设计原则 / Design rationale
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# Design rationale
+# ===========================================================================
 #
-#   目标：为「官方 Go + NDK clang」的 4 架构 Android 交叉编译提供
-#         Termux 的标准库补丁（DNS / CA / tmp / mDNS 的 Android 适配）。
+#   Goal: supply the Termux standard-library patches needed to cross-compile
+#         for Android with "official Go + NDK clang".
+#         (DNS / CA / tmp / mDNS paths, patched for Android by Termux.)
 #
-#   关键事实（已实测验证）：
+#   Verified facts:
 #
-#   1. **4 个架构的 Termux src/ 完全相同**（129 MB，net 目录 0 差异）。
-#      仅 3 个架构相关文件不同，且本方案都不需要：
-#        src/cmd/cgo/zdefaultcc.go            默认 CC 名（我们用 CC= 显式指定）
-#        src/cmd/go/internal/cfg/zdefaultcc.go 同上
-#        src/internal/buildcfg/zbootstrap.go  defaultGO_LDSO（NDK 自动设置）
-#      => **只下一个架构的 src 就够**，其余 3 个架构靠 NDK 的 sysroot/clang 补足。
+#   1. The src/ tree is IDENTICAL across all four architectures.
+#      Compared aarch64 / arm / i686 / x86_64: the 129 MB of content matches,
+#      with zero diff under net/. Only three architecture-specific files
+#      differ, and this approach uses none of them:
+#        src/cmd/cgo/zdefaultcc.go              default CC name (we pass CC=)
+#        src/cmd/go/internal/cfg/zdefaultcc.go  same
+#        src/internal/buildcfg/zbootstrap.go    defaultGO_LDSO (NDK sets it)
+#      => Downloading ONE architecture is enough. The other three come from
+#         the NDK toolchain and sysroot.
 #
-#   2. Termux 的 bin/go 与 pkg/tool/android_*/ 是 **bionic ELF**
-#      （interpreter = /system/bin/linker64），在纯 Linux / chroot / CI 中
-#      无法执行 —— 所以 **完全不需要下载它们**。
+#   2. Termux's bin/go and pkg/tool/android_*/ are bionic ELF binaries
+#      (interpreter /system/bin/linker64). They cannot run on plain Linux,
+#      in a chroot, or in CI, so they are NOT downloaded at all.
 #
-#   3. 本方案真正需要的，只有 src/ 里这 6 个文件：
-#        net/conf.go                   （改：加 !android 约束）
-#        net/dnsclient_unix.go         （改：加 !android 约束）
-#        net/interface_linux.go        （改：加 !android 约束）
-#        syscall/netlink_linux.go      （改：加 !android 约束）
-#        os/file_unix.go               （改：tmp 路径）
-#        crypto/x509/root_linux.go     （改：CA 路径）
-#      外加 Termux 新增的 4 个 android 专用文件（从 Termux src 直接复制）：
+#   3. What this approach actually needs is ten files under src/:
+#        net/conf.go                   (modify: add !android constraint)
+#        net/dnsclient_unix.go         (modify: add !android constraint)
+#        net/interface_linux.go        (modify: add !android constraint)
+#        syscall/netlink_linux.go      (modify: add !android constraint)
+#        os/file_unix.go               (modify: tmp path)
+#        crypto/x509/root_linux.go     (modify: CA path)
+#      plus the four android-only files Termux adds:
 #        net/conf_android.go
 #        net/dnsclient_android.go
 #        net/interface_android.go
 #        syscall/netlink_android.go
 #
-#   因此本脚本默认只下载 **1 个架构** 的 golang deb，并只解出 src/。
+#   So by default this script downloads ONE architecture's golang deb and
+#   extracts only those ten files.
 #
-# ─── 什么必下、什么不必下 ──────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# What must and must not be downloaded
+# ---------------------------------------------------------------------------
 #
-#   必下 / Required:
-#     ✓ Termux golang deb（1 个架构）—— 仅用于提取 src/ 里的 9 个补丁相关文件
-#     ✓ 官方 Go 工具链（Linux host 版）—— go.dev 下载，非 Termux（bionic 跑不了）
-#     ✓ Android NDK —— 由用户自备（版本不同，文件内容也不同，不要预设）
+#   Required:
+#     * Termux golang deb (one architecture) - source of the ten patch files
+#     * Official Go toolchain (Linux host build) - from go.dev, NOT Termux
+#       (the Termux build is bionic and cannot run outside Android)
+#     * Android NDK - supplied by the user; releases differ, nothing assumed
 #
-#   不必下 / NOT needed:
-#     ✗ 另外 3 个架构的 Termux 包（src 相同，纯浪费 ~110 MB）
-#     ✗ Termux 的 bin/go、pkg/tool/android_*/（bionic ELF，本方案用不到）
-#     ✗ Termux 的 clang / llvm / libc++（NDK 已提供，且 Termux 版是 bionic）
-#     ✗ Termux 的 ndk-sysroot（NDK 自带 sysroot）
-#     ✗ bootstrap zip（那是 Termux 根文件系统，本方案无关）
+#   NOT needed:
+#     * the other three architectures' packages (identical src/, ~110 MB wasted)
+#     * Termux bin/go and pkg/tool/android_*/ (bionic ELF; the NDK replaces them)
+#     * Termux clang / llvm / libc++ (the NDK provides these)
+#     * Termux ndk-sysroot (the NDK ships its own sysroot)
+#     * the bootstrap zip (that is a Termux rootfs, unrelated here)
 #
-#   可选 / Optional:
-#     ○ --with-appendix：额外保留整个 src/（如需自行改其他标准库）
+# ---------------------------------------------------------------------------
+# Usage
+# ---------------------------------------------------------------------------
 #
-# ═══════════════════════════════════════════════════════════════════════════
-# 用法 / Usage
-# ═══════════════════════════════════════════════════════════════════════════
+#   ./termux-go-fetch.sh [options]
 #
-#   ./termux-go-fetch.sh [选项]
+#   -a, --arch ABI     architecture to pull (default aarch64; the src is the
+#                      same either way, so this only affects download size)
+#   -o, --out DIR      output directory (default ./termux-go-patch)
+#   -m, --mirror URL   apt mirror (default the official one)
+#   -c, --cache DIR    .deb cache (default ~/.cache/termux-go/debs)
+#   --full-src         keep the whole src/ tree (default: only the ten files)
+#   --print-files      list the required files and exit, without downloading
+#   -h, --help         show this help
 #
-#   -a, --arch ABI     取的架构（默认 aarch64；仅影响 src，行为等价）
-#   -o, --out DIR      输出目录（默认 ./termux-go-patch）
-#   -m, --mirror URL   apt 仓库镜像（默认官方）
-#   -c, --cache DIR    .deb 缓存目录（默认 ~/.cache/termux-go/debs）
-#   --full-src         保留完整 src/（默认只保留补丁相关文件）
-#   --print-files      只打印需要的文件清单，不下载
-#   -h, --help         帮助
-#
-# 产物 / Output:
-#   <out>/patch-src/          提供的补丁源文件（9 个）
-#   <out>/goroot-src.tar.gz   打包好的补丁源（可直接喂给 patch-goroot-termux.sh）
-#   <out>/MANIFEST.txt        文件清单与来源说明
+# Output:
+#   <out>/patch-src/          the ten patch source files
+#   <out>/goroot-src.tar.gz   archive of the above, ready for
+#                             patch-goroot-termux.sh
+#   <out>/MANIFEST.txt        file list and provenance notes
 #
 set -euo pipefail
 
@@ -111,8 +117,8 @@ case "$ARCH" in
     *) die "不支持的架构: $ARCH（仅 aarch64/arm/i686/x86_64）" ;;
 esac
 
-# ---------- 必需文件清单 / Required file list ----------
-# 两类：待修改的官方文件 / Termux 新增的 android 实现
+# ---------- required file list ----------
+# two groups: official files to modify, and the android files Termux adds
 MODIFY_FILES=(
     "net/conf.go"
     "net/dnsclient_unix.go"
@@ -131,21 +137,20 @@ ALL_FILES=("${MODIFY_FILES[@]}" "${NEW_FILES[@]}")
 
 if [[ $PRINT_ONLY -eq 1 ]]; then
     cat <<EOF
-本方案需要的 Termux Go 源文件（共 ${#ALL_FILES[@]} 个）
-Required Termux Go source files (${#ALL_FILES[@]} total)
+Termux Go source files needed by this approach (${#ALL_FILES[@]} total)
 
-【待修改的官方文件 / files to modify】
+[files to modify]
 $(for f in "${MODIFY_FILES[@]}"; do echo "  src/$f"; done)
 
-【Termux 新增的 android 实现 / Termux-added android impls】
+[android-only files added by Termux]
 $(for f in "${NEW_FILES[@]}"; do echo "  src/$f"; done)
 
-【不需要 / NOT needed】
-  ✗ bin/go, pkg/tool/android_*/      bionic ELF，本方案用 NDK 替代
-  ✗ lib/, misc/                       非必需
-  ✗ 另外 3 个架构的包                  src/ 与架构无关（129 MB 完全相同）
-  ✗ Termux clang/llvm/libc++/sysroot  NDK 已提供
-  ✗ bootstrap-*.zip                   Termux 根文件系统，与本方案无关
+[NOT needed]
+  x bin/go, pkg/tool/android_*/      bionic ELF; the NDK replaces these
+  x lib/, misc/                      unrelated to the patches
+  x the other three ABI packages     src/ is identical across ABIs (129 MB)
+  x Termux clang/llvm/libc++/sysroot the NDK provides these
+  x bootstrap-*.zip                  a Termux rootfs, unrelated here
 EOF
     exit 0
 fi
@@ -153,7 +158,7 @@ fi
 need() { for c in "$@"; do command -v "$c" >/dev/null 2>&1 || die "缺少命令: $c"; done; }
 need curl tar ar
 
-# ---------- 缓存目录 / Cache dir ----------
+# ---------- cache directory ----------
 if [[ -n "$DEB_CACHE" ]]; then
     DEB_CACHE="${DEB_CACHE%/}"
 elif [[ -n "${XDG_CACHE_HOME:-}" ]]; then
@@ -166,27 +171,27 @@ mkdir -p "$DEB_CACHE"
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 
-log "架构 / arch     : $ARCH （仅用于取 src，4 架构等价）"
-log "缓存 / cache    : $DEB_CACHE"
-log "输出 / out      : $OUT_DIR"
+log "arch           : $ARCH (used only to pick src; all ABI trees are identical)"
+log "cache          : $DEB_CACHE"
+log "output         : $OUT_DIR"
 echo
 
-# ---------- 1. 查索引拿下载地址 / Resolve package URL ----------
-log "查询 apt 索引 / querying apt index"
+# ---------- 1. resolve the package URL from the apt index ----------
+log "querying the apt index"
 INDEX_URL="$MIRROR/dists/stable/main/binary-$ARCH/Packages"
 INDEX_FILE="$DEB_CACHE/.Packages.$ARCH"
 
 if [[ -s "$INDEX_FILE" ]] && [[ -n "$(grep -m1 '^Package: golang$' "$INDEX_FILE" 2>/dev/null)" ]]; then
-    ok "索引已缓存 / index cached"
+    ok "index already cached"
 else
     curl -fsSL --retry 3 --connect-timeout 20 "$INDEX_URL" -o "$INDEX_FILE.part" \
         || die "索引下载失败: $INDEX_URL"
     mv "$INDEX_FILE.part" "$INDEX_FILE"
-    ok "索引已下载 / index fetched"
+    ok "index fetched"
 fi
 
-# 解析 golang 记录的 Filename / SHA256 / Version / Size
-# 按空行分段；用 flag 标记是否进入目标包段落。
+# parse Filename / SHA256 / Version / Size for golang
+# Split on blank lines and pick the stanza for the target package.
 parse_index() {
     awk -v want="$PKG_NAME" '
         BEGIN { RS = ""; }
@@ -207,27 +212,27 @@ parse_index() {
 
 IFS=$'\t' read -r REL_PATH SHA256 VERSION SIZE < <(parse_index)
 [[ -n "$REL_PATH" ]] || die "索引里找不到 $PKG_NAME 包"
-ok "包 / package   : golang $VERSION  ($(echo "$SIZE/1048576" | bc -l 2>/dev/null || echo '?') MB)"
+ok "package        : golang $VERSION  ($(echo "$SIZE/1048576" | bc -l 2>/dev/null || echo '?') MB)"
 echo
 
-# ---------- 2. 下载 deb（带缓存与校验）/ Download deb ----------
+# ---------- 2. download the deb (cache and checksum) ----------
 DEB_FILE="$DEB_CACHE/$(basename "$REL_PATH")"
 
 if [[ -s "$DEB_FILE" ]] && echo "$SHA256  $DEB_FILE" | sha256sum -c --quiet 2>/dev/null; then
-    ok "deb 已缓存且校验通过 / cached & verified"
+    ok "deb already cached and verified"
 else
-    log "下载 golang deb / downloading"
+    log "downloading the golang deb"
     curl -fsSL --retry 3 --connect-timeout 30 "$MIRROR/$REL_PATH" -o "$DEB_FILE.part" \
         || die "deb 下载失败"
     mv "$DEB_FILE.part" "$DEB_FILE"
     echo "$SHA256  $DEB_FILE" | sha256sum -c --quiet 2>/dev/null \
         || die "SHA256 校验失败 / checksum mismatch"
-    ok "下载并校验完成 / downloaded & verified"
+    ok "downloaded and verified"
 fi
 echo
 
-# ---------- 3. 只解出需要的文件 / Extract only needed files ----------
-log "解包并挑选文件 / extracting selected files"
+# ---------- 3. extract only the files we need ----------
+log "extracting the selected files"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -235,27 +240,27 @@ trap 'rm -rf "$WORK"' EXIT
 PAYLOAD="$(ls "$WORK"/data.tar.* 2>/dev/null | head -1)"
 [[ -n "$PAYLOAD" ]] || die "deb 内没有 data.tar.*"
 
-# 先看是否含完整 src/（大包）还是只有精选（小包）
-# 注意：不能用 `tar -tf | grep -q`——grep 提前退出会产生 SIGPIPE，
-# 在 set -o pipefail 下会让管道判定为失败。改为先写清单文件再 grep。
+# check whether the deb carries a full src/ tree
+# Note: do not use `tar -tf | grep -q`; grep exiting early raises
+# SIGPIPE, which pipefail treats as failure. Write a listing first.
 # Avoid `tar -tf | grep -q`: SIGPIPE under pipefail breaks the pipeline.
 LIST_FILE="$WORK/list.txt"
 tar -tf "$PAYLOAD" > "$LIST_FILE" 2>/dev/null || true
 if ! grep -q 'lib/go/src/net/conf.go$' "$LIST_FILE"; then
-    die "该 deb 不含 lib/go/src/（意外的包结构）"
+    die "unexpected package layout: no lib/go/src/ in this deb"
 fi
 
 PATCH_SRC="$OUT_DIR/patch-src"
 rm -rf "$PATCH_SRC"; mkdir -p "$PATCH_SRC"
 
-# deb 内路径： ./data/data/com.termux/files/usr/lib/go/src/<rel>
-# 段数： . / data / data / com.termux / files / usr / lib / go / src
-# => strip 9 得到 <rel>（strip 8 会保留 src/ 前缀）
+# Paths inside the deb: ./data/data/com.termux/files/usr/lib/go/src/<rel>
+# Components: . / data / data / com.termux / files / usr / lib / go / src
+# => strip 9 yields <rel> (strip 8 would keep the src/ prefix)
 DEB_PREFIX="./data/data/com.termux/files/usr/lib/go/src"
 STRIP_LEVEL=9
 
 mkdir -p "$WORK/pick"
-# 一次性解出所有需要的文件（tar 会单趟完成，避免逐文件重复遍历大包）
+# Extract every needed member in one tar pass instead of rescanning
 # Extract all members in a single tar pass (avoids re-scanning the big archive).
 MEMBERS=()
 for rel in "${ALL_FILES[@]}"; do
@@ -271,75 +276,78 @@ for rel in "${ALL_FILES[@]}"; do
         cp "$WORK/pick/$rel" "$PATCH_SRC/$rel"
         extracted=$((extracted+1))
     else
-        warn "未提取到: src/$rel"
+        warn "not extracted: src/$rel"
     fi
 done
 
-ok "提取 $extracted/${#ALL_FILES[@]} 个文件 / extracted"
+ok "extracted $extracted of ${#ALL_FILES[@]} files"
 echo
 
-# ---------- 4. 可选：完整 src / Optional full src ----------
+# ---------- 4. optional: the full src/ tree ----------
 if [[ $FULL_SRC -eq 1 ]]; then
-    log "解出完整 src/（较慢、约 129 MB）/ extracting full src"
+    log "extracting the full src/ tree (slow, about 129 MB)"
     mkdir -p "$OUT_DIR/full-src"
-    # 整目录提取：strip 8 得到 src/ 前缀，再包一层以还原 src/ 结构
+    # Whole-tree extract: strip 8 leaves a src/ prefix, as intended.
     # Full tree: strip 8 leaves a 'src/' prefix, which is exactly what we want.
     tar -xf "$PAYLOAD" -C "$OUT_DIR/full-src" --strip-components=8 \
         "$DEB_PREFIX" 2>/dev/null || true
-    ok "完整 src 位于 / full src at: $OUT_DIR/full-src/src"
+    ok "full src at: $OUT_DIR/full-src/src"
 fi
 
-# ---------- 5. 打包 + 清单 / Archive + manifest ----------
-log "打包补丁源 / archiving patch sources"
+# ---------- 5. archive and manifest ----------
+log "archiving the patch sources"
 ARCHIVE="$OUT_DIR/goroot-src.tar.gz"
 ( cd "$PATCH_SRC" && tar -czf "$ARCHIVE" . ) 2>/dev/null
-ok "归档 / archive: $ARCHIVE  ($(du -h "$ARCHIVE" | cut -f1))"
+ok "archive        : $ARCHIVE  ($(du -h "$ARCHIVE" | cut -f1))"
 
 cat > "$OUT_DIR/MANIFEST.txt" <<EOF
-Termux Go 补丁源清单 / Termux Go patch source manifest
-生成时间 / generated : $(date '+%Y-%m-%d %H:%M:%S')
-架构 / arch          : $ARCH
-包版本 / pkg version : $VERSION
-apt 仓库 / mirror    : $MIRROR
-deb sha256           : $SHA256
+Termux Go patch source manifest
+generated   : $(date '+%Y-%m-%d %H:%M:%S')
+arch        : $ARCH
+pkg version : $VERSION
+apt mirror  : $MIRROR
+deb sha256  : $SHA256
 
-── 本方案需要的文件 / Files required by this approach ──
-$(for f in "${MODIFY_FILES[@]}"; do printf '  [改/modify]  src/%s\n' "$f"; done)
-$(for f in "${NEW_FILES[@]}"; do printf '  [新增/new]   src/%s\n' "$f"; done)
+-- Files required by this approach --
+$(for f in "${MODIFY_FILES[@]}"; do printf '  [modify]  src/%s\n' "$f"; done)
+$(for f in "${NEW_FILES[@]}"; do printf '  [new]     src/%s\n' "$f"; done)
 
-── 明确不需要 / Explicitly NOT needed ──
-  ✗ bin/go, pkg/tool/android_*/       bionic ELF（interpreter=/system/bin/linker64）
-  ✗ lib/, misc/                        与补丁无关
-  ✗ 另外 3 个架构的包                  src/ 完全相同（129 MB，net 目录 0 差异）
-  ✗ Termux clang / llvm / libc++ / ndk-sysroot   NDK 提供，且 Termux 版是 bionic
-  ✗ bootstrap-*.zip                    Termux 根文件系统，与本方案无关
+-- Explicitly NOT needed --
+  x bin/go, pkg/tool/android_*/      bionic ELF (interpreter=/system/bin/linker64)
+  x lib/, misc/                      unrelated to the patches
+  x the other three ABI packages     src/ is identical (129 MB, no diff in net/)
+  x Termux clang / llvm / libc++ / ndk-sysroot   the NDK provides these
+  x bootstrap-*.zip                  a Termux rootfs, unrelated here
 
-── 为什么 4 架构只需 1 份 src / Why one arch suffices ──
-  实测对比 aarch64 / arm / i686 / x86_64 四份 src/：129 MB 内容几乎完全一致，
-  仅 3 个「架构相关」文件不同，且本方案均不使用：
-    src/cmd/cgo/zdefaultcc.go              默认 CC 名（本方案用 CC= 显式指定）
-    src/cmd/go/internal/cfg/zdefaultcc.go  同上
-    src/internal/buildcfg/zbootstrap.go    defaultGO_LDSO（NDK 自动设置）
-  因此取任一架构的 src/ 即可，其余架构由 NDK 的 clang + sysroot 补足。
+-- Why one ABI's src suffices --
+  Comparing the src/ trees of aarch64 / arm / i686 / x86_64: the 129 MB of
+  content is essentially identical. Only three architecture-specific files
+  differ, and this approach uses none of them:
+    src/cmd/cgo/zdefaultcc.go              default CC name (we pass CC=)
+    src/cmd/go/internal/cfg/zdefaultcc.go  same
+    src/internal/buildcfg/zbootstrap.go    defaultGO_LDSO (the NDK sets it)
+  So any one ABI's src/ works; the NDK clang and sysroot supply the rest.
 
-── 下一步 / Next step ──
-  1) 准备官方 Go 工具链（Linux host 版，非 Termux）:
+-- Next steps --
+  1) Get an official Go toolchain (Linux host build, not the Termux one):
        curl -LO https://go.dev/dl/go<VER>.linux-<ARCH>.tar.gz
        tar -xzf go<VER>.linux-<ARCH>.tar.gz -C <GOROOT> --strip-components=1
-  2) 应用补丁:
+  2) Apply the patches:
        ./patch-goroot-termux.sh -g <GOROOT> -s $OUT_DIR
-  3) 用 NDK 编 4 架构:
+  3) Build the four ABIs with the NDK:
        ./android-cross-build.sh -n <NDK> -g <GOROOT> -o out
 EOF
 
-ok "清单 / manifest: $OUT_DIR/MANIFEST.txt"
+ok "manifest       : $OUT_DIR/MANIFEST.txt"
 echo
-log "完成 / done"
+log "done"
 echo
-echo "  补丁源 / patch src : $PATCH_SRC  （${#ALL_FILES[@]} 个文件）"
-echo "  归档   / archive   : $ARCHIVE"
-echo "  清单   / manifest  : $OUT_DIR/MANIFEST.txt"
+echo "  patch src : $PATCH_SRC  (${#ALL_FILES[@]} files)"
+echo "  archive   : $ARCHIVE"
+echo "  manifest  : $OUT_DIR/MANIFEST.txt"
 echo
-echo "  注意 / note:"
-echo "    • 版本必须与官方 Go 一致（补丁可能依赖同版本 internal 包）"
-echo "    • NDK 由用户自备：不同 NDK 版本产生的 sysroot/clang 不同，不予预设"
+echo "  note:"
+echo "    - the Go version must match the official toolchain: the patches may"
+echo "      depend on internal packages that only exist in that release"
+echo "    - the NDK is provided by the user; different NDK releases ship"
+echo "      different sysroots and clang builds, so none is assumed here"

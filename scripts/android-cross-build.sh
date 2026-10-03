@@ -1,82 +1,89 @@
 #!/usr/bin/env bash
 #
-# android-cross-build.sh — 完全脱离 Android 运行时，交叉编译 4 架构 Android 产物
-# android-cross-build.sh — Cross-compile 4 Android ABIs without any Android runtime
+# android-cross-build.sh - cross-compile for four Android ABIs without any
+#                          Android runtime
 #
-# ═══════════════════════════════════════════════════════════════════════════
-# 结论 / Conclusion（已在本机与远端 arm64 Linux 双重实测）
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# Conclusion (verified on two hosts: proot Ubuntu 24.04 arm64 and a chroot
+# Debian 12 arm64)
+# ===========================================================================
 #
-#   Go 工具链对 android/* 的链接方式有一条硬编码规则
-#   （见 cmd/go/internal/work/init.go: mustUseExternalLinker）：
+#   Go hardcodes how android/* targets are linked (see
+#   cmd/go/internal/work/init.go, mustUseExternalLinker):
 #
-#     GOOS=android GOARCH=arm64  -> 允许 CGO_ENABLED=0（纯静态，NEEDED 为空）
-#     GOOS=android GOARCH=arm    -> 必须 CGO_ENABLED=1（external linking）
-#     GOOS=android GOARCH=386    -> 必须 CGO_ENABLED=1
-#     GOOS=android GOARCH=amd64  -> 必须 CGO_ENABLED=1
+#     GOOS=android GOARCH=arm64  -> CGO_ENABLED=0 is allowed (fully static)
+#     GOOS=android GOARCH=arm    -> CGO_ENABLED=1 is mandatory
+#     GOOS=android GOARCH=386    -> CGO_ENABLED=1 is mandatory
+#     GOOS=android GOARCH=amd64  -> CGO_ENABLED=1 is mandatory
 #
-#   因此 **只有 arm64 能纯 Go 编**；其余 3 个架构若 CGO_ENABLED=0 会直接报：
+#   With CGO_ENABLED=0 the last three fail with:
 #       loadinternal: cannot find runtime/cgo
 #       link: running gcc failed
-#   这是 Go 设计如此，不是环境缺失。
+#   That is a design decision in Go, not a missing dependency.
 #
-#   要编 4 架构，唯一稳妥做法：**一律 CGO_ENABLED=1 + Android NDK clang**。
+#   So building all four ABIs means CGO_ENABLED=1 plus the Android NDK clang.
 #
-# ─── 为什么用 NDK 而不是 Termux 工具链 ───────────────────────────────────
+# ---------------------------------------------------------------------------
+# Why the NDK and not the Termux toolchain
+# ---------------------------------------------------------------------------
 #
-#   Termux 的 go / clang 是 bionic ELF：
+#   Termux's go and clang are bionic ELF binaries:
 #       interpreter = /system/bin/linker64
 #       NEEDED      = libc.so(bionic), libLLVM.so, libclang-cpp.so ...
-#   → 只能在「有 Android 系统库 + linker」的环境跑；
-#     纯 Linux / chroot / 容器 / CI 里无法执行（即便能跑也需要 /system 可见）。
+#   They only run where the Android system libraries and linker exist, which
+#   rules out plain Linux, chroots, containers and CI.
 #
-#   NDK 的 clang 是普通 Linux ELF：
-#       interpreter = /lib/ld-linux-aarch64.so.1（或 x86_64 对应）
-#       NEEDED      = libc.so.6, libm.so.6 ...（标准 glibc）
-#       且自带 sysroot（含 libc.so / liblog.so / libdl.so / libm.so）
-#   → 在任何 Linux 上都能跑，**完全不需要 Android 运行时**。
+#   The NDK's clang is an ordinary Linux binary:
+#       interpreter = /lib/ld-linux-aarch64.so.1 (or the x86_64 equivalent)
+#       NEEDED      = libc.so.6, libm.so.6 ... (standard glibc)
+#   and it ships a self-contained sysroot (libc.so, liblog.so, libdl.so,
+#   libm.so), so it runs anywhere.
 #
-#   两种途径链接出的产物 ABI 完全一致（都是 bionic 动态链接 +
-#   /system/bin/linker），所以 NDK 方案不会有兼容性差异。
+#   Both routes produce the same ABI: a bionic binary whose interpreter is
+#   /system/bin/linker. Using the NDK costs nothing in compatibility.
 #
-# ─── 关于“与 Termux 原始运行时相似度” ───────────────────────────────────
+# ---------------------------------------------------------------------------
+# Similarity to the Termux runtime
+# ---------------------------------------------------------------------------
 #
-#   产物层面：两者都产出 Android ELF，运行时都依赖设备 /system 的 bionic，
-#   因此运行行为一致。
-#   唯一差别是「编译期 sysroot 来自谁」：
-#     NDK sysroot   : 自包含、可离线、跨机器可复现  ← 推荐
-#     Termux sysroot: 不含 libc.so（靠设备提供），只适合在 Termux 内编译
-#   若确实需要 Termux 那 4 处 stdlib 补丁（resolv.conf/cert.pem/mdns/tmp），
-#   用 --termux-goroot 指定 Termux 的 GOROOT 即可（见下）。
+#   Output: both routes yield an Android ELF that depends on the device's
+#   bionic at run time, so behaviour is the same.
+#   The only difference is where the compile-time sysroot comes from:
+#     NDK sysroot    : self-contained, offline, reproducible across machines
+#     Termux sysroot : lacks libc.so (the device supplies it), so it only
+#                      works when building inside Termux
+#   If you do want the four Termux stdlib patches (resolv.conf, cert.pem,
+#   mdns, tmp), pass a patched GOROOT with -g; see patch-goroot-termux.sh.
 #
-# ═══════════════════════════════════════════════════════════════════════════
-# 用法 / Usage
-# ═══════════════════════════════════════════════════════════════════════════
+# ---------------------------------------------------------------------------
+# Usage
+# ---------------------------------------------------------------------------
 #
-#   ./android-cross-build.sh [选项] -- [额外 go build 参数]
+#   ./android-cross-build.sh [options] -- [extra go build args]
 #
-#   -n, --ndk DIR        NDK 路径（默认自动探测 ANDROID_NDK_HOME / ~/Android/Sdk/ndk/*）
-#   -o, --out DIR        输出目录（默认 ./android-out）
-#   -t, --api NUM        Android API level（默认 24）
-#   -a, --arch LIST      目标 ABI，逗号分隔（默认全部 4 个）
-#   -g, --goroot DIR     指定 GOROOT（如 Termux 的 lib/go）；默认用 PATH 里的 go
-#   -p, --package SPEC   要编译的包（默认 .）
-#   -b, --basename NAME  产物前缀（默认取包名或 app）
-#   -P, --prefix NAME    .so 文件名前缀（默认 lib）
-#   --tags TAGS          传给 go build 的 tags
-#   --ldflags FLAGS      覆盖默认 ldflags
-#   --static-arm64       arm64 用 CGO_ENABLED=0 纯静态（其余仍 cgo）
-#   --check              只做环境检查，不编译
-#   -h, --help           帮助
+#   -n, --ndk DIR        NDK path (default: auto-detect ANDROID_NDK_HOME,
+#                        ~/Android/Sdk/ndk/*, ...)
+#   -o, --out DIR        output directory (default ./android-out)
+#   -t, --api NUM        Android API level (default 24)
+#   -a, --arch LIST      comma-separated ABIs (default all four)
+#   -g, --goroot DIR     GOROOT to use (e.g. a patched one); default: go on PATH
+#   -p, --package SPEC   package to build (default .)
+#   -b, --basename NAME  artifact name (default: the package or "app")
+#   -P, --prefix NAME    .so file prefix (default lib)
+#   --tags TAGS          build tags passed to go build
+#   --ldflags FLAGS      override the default ldflags
+#   --static-arm64       build arm64 with CGO_ENABLED=0 (the rest still cgo)
+#   --check              check the environment and exit, no build
+#   -h, --help           show this help
 #
-# 例 / Examples:
+# Examples:
 #   ./android-cross-build.sh -n ~/ndk -o out --tags no_ui
 #   ./android-cross-build.sh --static-arm64 -o out
 #   ./android-cross-build.sh -a arm64-v8a,armeabi-v7a
 #
 set -euo pipefail
 
-# ---------- 默认值 / Defaults ----------
+# ---------- Defaults ----------
 OUT_DIR="./android-out"
 NDK_DIR="${ANDROID_NDK_HOME:-}"
 API=24
@@ -119,31 +126,32 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ---------- 1. 定位 Go / Locate Go ----------
-log "检查 Go 工具链 / checking Go toolchain"
+# ---------- 1. locate Go ----------
+log "checking the Go toolchain"
 if [[ -n "$GOROOT_OVERRIDE" ]]; then
     GO_BIN="$GOROOT_OVERRIDE/bin/go"
-    [[ -x "$GO_BIN" ]] || die "GOROOT 里没有 bin/go: $GOROOT_OVERRIDE"
+    [[ -x "$GO_BIN" ]] || die "no bin/go inside that GOROOT: $GOROOT_OVERRIDE"
     export GOROOT="$GOROOT_OVERRIDE"
 else
     GO_BIN="$(command -v go || true)"
-    [[ -n "$GO_BIN" ]] || die "找不到 go，请安装 Go 或用 -g 指定 GOROOT"
+    [[ -n "$GO_BIN" ]] || die "go not found; install Go or point -g at a GOROOT"
 fi
 
 GO_VER="$("$GO_BIN" version 2>/dev/null || echo unknown)"
 log "  $GO_VER"
 
-# Go 版本要求（go2rtc 需要 1.24+；一般项目 1.21+）
+# Go version requirement (go2rtc needs 1.24+; most projects 1.21+)
 GOVER_NUM="$(echo "$GO_VER" | sed -n 's/.*go\([0-9]*\.[0-9]*\).*/\1/p')"
 if [[ -n "$GOVER_NUM" ]]; then
     major="${GOVER_NUM%%.*}"; minor="${GOVER_NUM##*.}"
     if (( major == 1 && minor < 21 )); then
-        warn "Go $GOVER_NUM 较老：不支持 -checklinkname，且可能无法处理 go 1.24 的 go.mod"
+        warn "Go $GOVER_NUM is old: no -checklinkname support, and it may not" 
+        warn "understand a go 1.24 go.mod"
     fi
 fi
 
-# ---------- 2. 定位 NDK / Locate NDK ----------
-log "检查 Android NDK / checking NDK"
+# ---------- 2. locate the NDK ----------
+log "checking the Android NDK"
 find_ndk() {
     local best="" ver=-1 cand v
     local cands=(
@@ -165,20 +173,20 @@ find_ndk() {
 }
 
 if [[ -z "$NDK_DIR" ]]; then
-    NDK_DIR="$(find_ndk)" || die "找不到 Android NDK。设置 ANDROID_NDK_HOME，或用 -n 指定。"
+    NDK_DIR="$(find_ndk)" || die "no Android NDK found. Set ANDROID_NDK_HOME or pass -n."
 fi
-[[ -d "$NDK_DIR/toolchains/llvm/prebuilt" ]] || die "无效的 NDK: $NDK_DIR"
+[[ -d "$NDK_DIR/toolchains/llvm/prebuilt" ]] || die "not a valid NDK: $NDK_DIR"
 
-# host 工具链
+# host toolchain
 case "$(uname -s)" in
     Linux)  HOST_OS="linux" ;;
     Darwin) HOST_OS="darwin" ;;
-    *)      die "不支持的系统: $(uname -s)" ;;
+    *)      die "unsupported operating system: $(uname -s)" ;;
 esac
 case "$(uname -m)" in
     x86_64|amd64)  HOST_ARCH="x86_64" ;;
     aarch64|arm64) HOST_ARCH="arm64" ;;
-    *)             die "不支持的构建机架构: $(uname -m)" ;;
+    *)             die "unsupported host architecture: $(uname -m)" ;;
 esac
 
 PREBUILT="$NDK_DIR/toolchains/llvm/prebuilt/${HOST_OS}-${HOST_ARCH}"
@@ -187,40 +195,41 @@ if [[ ! -d "$PREBUILT/bin" ]]; then
         [[ -d "$NDK_DIR/toolchains/llvm/prebuilt/$alt/bin" ]] && PREBUILT="$NDK_DIR/toolchains/llvm/prebuilt/$alt" && break
     done
 fi
-[[ -d "$PREBUILT/bin" ]] || die "NDK 缺少 host 工具链: $PREBUILT"
+[[ -d "$PREBUILT/bin" ]] || die "the NDK lacks this host toolchain: $PREBUILT"
 
 CLANG="$PREBUILT/bin/clang"
-[[ -x "$CLANG" ]] || die "clang 不存在: $CLANG"
+[[ -x "$CLANG" ]] || die "clang not present: $CLANG"
 
-# 关键检查：clang 必须是普通 Linux ELF 且能在本机执行
+# key check: clang must be an ordinary Linux ELF that runs here
 if ! "$CLANG" --version >/dev/null 2>&1; then
-    bad "clang 无法执行: $CLANG"
-    die "该 NDK 的 host 工具链与本机不兼容（请用匹配 uname -m 的 NDK）"
+    bad "clang is not executable: $CLANG"
+    die "this NDK host toolchain does not run here (use one matching uname -m)"
 fi
 ok "NDK     : $NDK_DIR"
 ok "host    : ${HOST_OS}-${HOST_ARCH}"
 ok "clang   : $("$CLANG" --version 2>/dev/null | head -1)"
 
-# 验证 clang 是纯 Linux（脱离 Android 运行时）
+# verify clang is plain Linux (independent of the Android runtime)
 CLANG_INTERP="$(readelf -l "$(readlink -f "$CLANG")" 2>/dev/null | sed -n 's/.*interpreter: \([^]]*\)\]/\1/p' | head -1)"
 if [[ -n "$CLANG_INTERP" ]]; then
     if [[ "$CLANG_INTERP" == /system/* ]]; then
-        warn "clang 解释器是 Android linker ($CLANG_INTERP) —— 未脱离 Android 运行时"
+        warn "clang interpreter is the Android linker ($CLANG_INTERP):"
+        warn "this toolchain still depends on the Android runtime"
     else
-        ok "clang 解释器: $CLANG_INTERP （纯 Linux，无需 Android）"
+        ok "clang interpreter: $CLANG_INTERP (plain Linux, no Android needed)"
     fi
 fi
 
-# 确认 sysroot 自包含（NDK 自带 libc.so）
+# confirm the sysroot is self-contained (the NDK ships libc.so)
 SYSROOT="$PREBUILT/sysroot"
 if [[ -f "$SYSROOT/usr/lib/aarch64-linux-android/$API/libc.so" ]]; then
-    ok "sysroot : $SYSROOT （自包含，含 libc.so/liblog.so/libdl.so）"
+    ok "sysroot : $SYSROOT (self-contained: libc.so/liblog.so/libdl.so)"
 else
-    warn "sysroot 缺少 API $API 的 libc.so，可能影响链接"
+    warn "sysroot has no libc.so for API $API; linking may fail"
 fi
 
-# ---------- 3. 架构映射 / ABI mapping ----------
-# 输出: goarch|goarm|ndk_triple_prefix
+# ---------- 3. ABI mapping ----------
+# output: goarch|goarm|ndk_triple_prefix
 arch_spec() {
     case "$1" in
         arm64-v8a)    echo "arm64||aarch64-linux-android" ;;
@@ -234,32 +243,32 @@ arch_spec() {
     esac
 }
 
-# ---------- 4. 检查模式 / Check-only mode ----------
+# ---------- 4. check-only mode ----------
 if [[ $CHECK_ONLY -eq 1 ]]; then
     echo
-    log "环境检查完成 / environment check complete"
+    log "environment check complete"
     echo
-    echo "  构建机 : $(uname -s) $(uname -m)"
+    echo "  host     : $(uname -s) $(uname -m)"
     echo "  Go     : $GO_VER"
     echo "  NDK    : $NDK_DIR"
-    echo "  工具链 : $PREBUILT"
+    echo "  toolchain: $PREBUILT"
     echo "  sysroot: $SYSROOT"
     echo
-    echo "  ABI            Go 目标        编译器"
+    echo "  ABI            Go target       compiler"
     echo "  -------------  -------------  ------------------------------------"
     IFS=',' read -r -a _al <<< "$ARCHES"
     for abi in "${_al[@]}"; do
-        spec="$(arch_spec "$abi" 2>/dev/null)" || { printf '  %-13s  (未知 ABI)\n' "$abi"; continue; }
+        spec="$(arch_spec "$abi" 2>/dev/null)" || { printf '  %-13s  (unknown ABI)\n' "$abi"; continue; }
         ga="${spec%%|*}"; r="${spec#*|}"; garm="${r%%|*}"; triple="${r##*|}"
         cc="${triple}${API}-clang"
-        # 检查模式也应加上 NDK bin 再查找编译器
-        ccp="$(PATH="$PREBUILT/bin:$PATH" command -v "$cc" 2>/dev/null || echo '未找到')"
+        # the check must also look under the NDK bin directory
+        ccp="$(PATH="$PREBUILT/bin:$PATH" command -v "$cc" 2>/dev/null || echo 'not found')"
         printf '  %-13s  %-13s  %s\n' "$abi" "android/${ga}${garm:+ GOARM=$garm}" "$ccp"
     done
     exit 0
 fi
 
-# ---------- 5. 准备输出 / Prepare output ----------
+# ---------- 5. prepare the output ----------
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 export PATH="$PREBUILT/bin:$PATH"
@@ -269,7 +278,7 @@ export PATH="$PREBUILT/bin:$PATH"
 
 if [[ -z "$LDFLAGS_OVERRIDE" ]]; then
     LDFLAGS_VAL="-checklinkname=0 -s -w"
-    # Go < 1.23 不支持 -checklinkname
+    # Go before 1.23 does not accept -checklinkname
     if [[ -n "${GOVER_NUM:-}" ]] && (( ${GOVER_NUM##*.} < 23 )); then
         LDFLAGS_VAL="-s -w"
     fi
@@ -278,25 +287,25 @@ else
 fi
 
 echo
-log "配置 / Configuration"
-echo "  输出目录 / out   : $OUT_DIR"
+log "configuration"
+echo "  out              : $OUT_DIR"
 echo "  API level        : $API"
 echo "  Go binary        : $GO_BIN"
 echo "  ldflags          : $LDFLAGS_VAL"
 echo "  tags             : ${TAGS:-<none>}"
-echo "  arm64 纯静态     : $([[ $STATIC_ARM64 -eq 1 ]] && echo yes || echo no)"
+echo "  arm64 static     : $([[ $STATIC_ARM64 -eq 1 ]] && echo yes || echo no)"
 echo
 
-# ---------- 6. 编译 / Build ----------
+# ---------- 6. build ----------
 RESULT=()
 FAILED=0
 
 IFS=',' read -r -a ARCH_LIST <<< "$ARCHES"
 for abi in "${ARCH_LIST[@]}"; do
-    spec="$(arch_spec "$abi")" || { warn "未知 ABI: $abi，跳过"; FAILED=1; continue; }
+    spec="$(arch_spec "$abi")" || { warn "unknown ABI: $abi, skipping"; FAILED=1; continue; }
     goarch="${spec%%|*}"; rest="${spec#*|}"; goarm="${rest%%|*}"; triple="${rest##*|}"
 
-    # 选择编译器（arm32 的 triple 前缀在不同 NDK 里有差异）
+    # Pick the compiler; the arm32 triple prefix varies between NDKs.
     cc=""
     for cand in "${triple}${API}-clang" \
                 "${triple}${API}-clang.exe" \
@@ -305,14 +314,14 @@ for abi in "${ARCH_LIST[@]}"; do
         if command -v "$cand" >/dev/null 2>&1; then cc="$cand"; break; fi
     done
     if [[ -z "$cc" ]]; then
-        bad "$abi: 找不到编译器 (${triple}${API}-clang)"
+        bad "$abi: compiler not found (${triple}${API}-clang)"
         FAILED=1; continue
     fi
 
     out_path="$OUT_DIR/${SO_PREFIX}${BASENAME}_${abi}.so"
     err_file="$OUT_DIR/.err_$abi"
 
-    # 决定 CGO 与静态策略
+    # decide the CGO and static strategy
     cgo=1
     if [[ $STATIC_ARM64 -eq 1 && "$goarch" == "arm64" ]]; then
         cgo=0
@@ -341,7 +350,7 @@ for abi in "${ARCH_LIST[@]}"; do
         need="$(readelf -d "$out_path" 2>/dev/null | grep NEEDED | sed 's/.*\[\(.*\)\]/\1/' | tr '\n' '+' | sed 's/+$//')"
         printf '\033[1;32mOK\033[0m  %.2f MB\n' "$(echo "$size/1048576" | bc -l)"
         printf '                %s\n' "$elf"
-        printf '                NEEDED=%s\n' "${need:-<none, 纯静态>}"
+        printf '                NEEDED=%s\n' "${need:-<none, fully static>}"
         RESULT+=("$abi|$out_path|$size|${need:-static}")
         rm -f "$err_file"
     else
@@ -351,11 +360,11 @@ for abi in "${ARCH_LIST[@]}"; do
     fi
 done
 
-# ---------- 7. 汇总 / Summary ----------
+# ---------- 7. summary ----------
 echo
-log "汇总 / Summary"
+log "summary"
 echo "  ┌────────────────┬──────────────────────────────────────────────┐"
-printf '  │ %-14s │ %-44s │\n' "ABI" "产物 / Artifact"
+printf '  │ %-14s │ %-44s │\n' "ABI" "artifact"
 echo "  ├────────────────┼──────────────────────────────────────────────┤"
 for r in "${RESULT[@]:-}"; do
     [[ -n "$r" ]] || continue
@@ -365,7 +374,7 @@ for r in "${RESULT[@]:-}"; do
 done
 echo "  └────────────────┴──────────────────────────────────────────────┘"
 echo
-echo "  嵌入 APK / Embed into APK:"
+echo "  embed into an APK:"
 for r in "${RESULT[@]:-}"; do
     [[ -n "$r" ]] || continue
     IFS='|' read -r abi path size need <<< "$r"
@@ -373,6 +382,6 @@ for r in "${RESULT[@]:-}"; do
 done
 
 if [[ $FAILED -ne 0 ]]; then
-    die "部分架构失败 / some ABIs failed"
+    die "some ABIs failed"
 fi
-log "全部成功 / all ABIs built OK"
+log "all ABIs built successfully"
